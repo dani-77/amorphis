@@ -5,13 +5,15 @@
 //! as a lock-acquisition failure and never claims stronger isolation.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
-use crate::background::{LOCK_COLOR, StaticBackground, start_loader};
-use crate::image::{FitMode, ImageLimits, RgbaImage};
+use crate::background::{
+    BackgroundReceiver, BackgroundSource, LOCK_COLOR, StaticBackground, start_loader,
+};
+use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use std::error::Error;
 use std::fmt;
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
 use x11rb::CURRENT_TIME;
@@ -22,7 +24,7 @@ use x11rb::protocol::randr::{ConnectionExt as _, NotifyMask};
 use x11rb::protocol::xproto::{
     ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt as _, CreateGCAux,
     CreateWindowAux, EventMask, Gcontext, GrabMode, GrabStatus, Rectangle, Screen, StackMode,
-    Window, WindowClass,
+    Visualid, Window, WindowClass,
 };
 use x11rb::xcb_ffi::XCBConnection;
 use xkbcommon::xkb::{self, KeyDirection, Keycode, Keysym};
@@ -30,6 +32,15 @@ use xkbcommon::xkb::{self, KeyDirection, Keycode, Keysym};
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const GRAB_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 const GRAB_ATTEMPTS: usize = 6;
+
+type PerRootImages = Vec<(Window, RgbaImage)>;
+type CaptureReceiver = Receiver<Result<PerRootImages, String>>;
+
+struct RootCapture {
+    root: Window,
+    pixel_layout: PixelLayout,
+    image: X11Image<'static>,
+}
 
 #[derive(Debug)]
 pub struct X11Error(String);
@@ -56,6 +67,41 @@ struct LockWindow {
     pixel_layout: PixelLayout,
     width: u16,
     height: u16,
+    root_visual: Visualid,
+}
+
+enum PendingBackground {
+    Shared(BackgroundReceiver),
+    PerRoot(CaptureReceiver),
+}
+
+impl PendingBackground {
+    fn try_recv(&self) -> Result<Result<LoadedBackground, String>, TryRecvError> {
+        match self {
+            Self::Shared(receiver) => receiver
+                .try_recv()
+                .map(|result| result.map(LoadedBackground::Shared)),
+            Self::PerRoot(receiver) => receiver
+                .try_recv()
+                .map(|result| result.map(LoadedBackground::PerRoot)),
+        }
+    }
+}
+
+enum LoadedBackground {
+    Shared(RgbaImage),
+    PerRoot(PerRootImages),
+}
+
+impl LoadedBackground {
+    fn image_for(&self, root: Window) -> Option<&RgbaImage> {
+        match self {
+            Self::Shared(image) => Some(image),
+            Self::PerRoot(images) => images
+                .iter()
+                .find_map(|(candidate, image)| (*candidate == root).then_some(image)),
+        }
+    }
 }
 
 /// Lock an X11 display until PAM authentication succeeds.
@@ -68,8 +114,18 @@ pub fn run(
         .map_err(|error| X11Error::new(format!("could not connect to X11: {error}")))?;
     require_randr(&connection)?;
     let limits = ImageLimits::default();
-    let (mut background_rx, background_fit) = start_loader(static_background, limits);
-    let mut background_image = None;
+    let (capture_effect, mut pending_background, background_fit) = match static_background {
+        Some(StaticBackground {
+            source: BackgroundSource::DesktopCapture,
+            fit,
+            effect,
+        }) => (Some(effect), None, fit),
+        background => {
+            let (receiver, fit) = start_loader(background, limits);
+            (None, receiver.map(PendingBackground::Shared), fit)
+        }
+    };
+    let mut loaded_background = None;
     let mut keyboard = XkbKeyboard::new(&connection)?;
     let mut machine = LockMachine::new();
     let mut auth = AuthWorker::spawn(PamProvider::new(pam_service, username)).map_err(|error| {
@@ -91,6 +147,7 @@ pub fn run(
         .map_err(|error| X11Error::new(format!("could not freeze X11 setup: {error}")))?
         .check()
         .map_err(|error| X11Error::new(format!("could not freeze X11 setup: {error}")))?;
+    let capture_result = capture_effect.map(|_| capture_roots(&connection, &windows));
     let map_result = map_and_raise_all(&connection, &windows);
     let ungrab_result = connection
         .ungrab_server()
@@ -102,6 +159,26 @@ pub fn run(
     machine
         .apply(LockEvent::LockConfirmed)
         .map_err(|error| X11Error::new(error.to_string()))?;
+
+    if let Some(effect) = capture_effect {
+        pending_background = match capture_result {
+            Some(Ok(captures)) => {
+                start_capture_processor(captures, effect, limits).map(PendingBackground::PerRoot)
+            }
+            Some(Err(error)) => {
+                eprintln!("amorphis: {error}; using the embedded fallback background");
+                let fallback = StaticBackground {
+                    source: BackgroundSource::EmbeddedFallback,
+                    fit: background_fit,
+                    effect,
+                };
+                start_loader(Some(fallback), limits)
+                    .0
+                    .map(PendingBackground::Shared)
+            }
+            None => None,
+        };
+    }
 
     let mut authentication_available = true;
     loop {
@@ -149,14 +226,10 @@ pub fn run(
                         } else {
                             lock.width = event.width;
                             lock.height = event.height;
-                            if let Some(image) = background_image.as_ref()
-                                && let Err(error) = render_background(
-                                    &connection,
-                                    lock,
-                                    image,
-                                    background_fit,
-                                    limits,
-                                )
+                            if let Some(image) = loaded_background.as_ref().and_then(
+                                |background: &LoadedBackground| background.image_for(lock.root),
+                            ) && let Err(error) =
+                                render_background(&connection, lock, image, background_fit, limits)
                             {
                                 eprintln!("amorphis: {error}; retaining solid X11 background");
                             }
@@ -164,8 +237,13 @@ pub fn run(
                     }
                 }
                 Event::Expose(event) => {
-                    if let Some(image) = background_image.as_ref()
-                        && let Some(lock) = windows.iter().find(|lock| lock.window == event.window)
+                    if let Some(lock) = windows.iter().find(|lock| lock.window == event.window)
+                        && let Some(image) =
+                            loaded_background
+                                .as_ref()
+                                .and_then(|background: &LoadedBackground| {
+                                    background.image_for(lock.root)
+                                })
                         && let Err(error) =
                             render_background(&connection, lock, image, background_fit, limits)
                     {
@@ -186,31 +264,31 @@ pub fn run(
             }
         }
 
-        if let Some(receiver) = background_rx.as_ref() {
-            match receiver.try_recv() {
-                Ok(Ok(image)) => {
-                    background_rx = None;
-                    background_image = Some(image);
-                    if let Some(image) = background_image.as_ref() {
-                        for lock in &windows {
-                            if let Err(error) =
+        let background_result = pending_background.as_ref().map(PendingBackground::try_recv);
+        match background_result {
+            Some(Ok(Ok(background))) => {
+                pending_background = None;
+                loaded_background = Some(background);
+                if let Some(background) = loaded_background.as_ref() {
+                    for lock in &windows {
+                        if let Some(image) = background.image_for(lock.root)
+                            && let Err(error) =
                                 render_background(&connection, lock, image, background_fit, limits)
-                            {
-                                eprintln!("amorphis: {error}; retaining solid X11 background");
-                            }
+                        {
+                            eprintln!("amorphis: {error}; retaining solid X11 background");
                         }
                     }
                 }
-                Ok(Err(error)) => {
-                    background_rx = None;
-                    eprintln!("amorphis: {error}; retaining solid X11 background");
-                }
-                Err(TryRecvError::Disconnected) => {
-                    background_rx = None;
-                    eprintln!("amorphis: PNG loader stopped; retaining solid X11 background");
-                }
-                Err(TryRecvError::Empty) => {}
             }
+            Some(Ok(Err(error))) => {
+                pending_background = None;
+                eprintln!("amorphis: {error}; retaining solid X11 background");
+            }
+            Some(Err(TryRecvError::Disconnected)) => {
+                pending_background = None;
+                eprintln!("amorphis: background worker stopped; retaining solid X11 background");
+            }
+            Some(Err(TryRecvError::Empty)) | None => {}
         }
 
         match auth.try_response() {
@@ -450,6 +528,7 @@ fn create_lock_windows(connection: &XCBConnection) -> Result<Vec<LockWindow>, X1
             pixel_layout,
             width: screen.width_in_pixels,
             height: screen.height_in_pixels,
+            root_visual: screen.root_visual,
         });
     }
     Ok(windows)
@@ -472,6 +551,87 @@ fn root_pixel_layout(screen: &Screen) -> Result<PixelLayout, X11Error> {
     }
     PixelLayout::from_visual_type(visual.1)
         .map_err(|error| X11Error::new(format!("unsupported X11 root visual: {error}")))
+}
+
+fn capture_roots(
+    connection: &XCBConnection,
+    windows: &[LockWindow],
+) -> Result<Vec<RootCapture>, X11Error> {
+    let mut captures = Vec::with_capacity(windows.len());
+    for lock in windows {
+        let (captured, visual): (X11Image<'static>, Visualid) =
+            X11Image::get(connection, lock.root, 0, 0, lock.width, lock.height)
+                .map_err(|error| X11Error::new(format!("could not capture X11 root: {error}")))?;
+        if visual != lock.root_visual || captured.depth() != lock.depth {
+            return Err(X11Error::new(
+                "captured X11 root does not match its configured visual",
+            ));
+        }
+        captures.push(RootCapture {
+            root: lock.root,
+            pixel_layout: lock.pixel_layout,
+            image: captured,
+        });
+    }
+    Ok(captures)
+}
+
+fn capture_to_rgba(
+    capture: RootCapture,
+    limits: ImageLimits,
+) -> Result<(Window, RgbaImage), String> {
+    let width = capture.image.width();
+    let height = capture.image.height();
+    let mut rgba = RgbaImage::solid(u32::from(width), u32::from(height), [0, 0, 0, 255], limits)
+        .map_err(|error| format!("could not allocate X11 capture: {error}"))?;
+    let row_width = usize::from(width);
+    for y in 0..height {
+        for x in 0..width {
+            let (red, green, blue) = capture.pixel_layout.decode(capture.image.get_pixel(x, y));
+            let offset = (usize::from(y) * row_width + usize::from(x)) * 4;
+            rgba.pixels_mut()[offset..offset + 4].copy_from_slice(&[
+                component_to_u8(red),
+                component_to_u8(green),
+                component_to_u8(blue),
+                255,
+            ]);
+        }
+    }
+    Ok((capture.root, rgba))
+}
+
+fn component_to_u8(value: u16) -> u8 {
+    ((u32::from(value) + 128) / 257) as u8
+}
+
+fn start_capture_processor(
+    captures: Vec<RootCapture>,
+    effect: ImageEffect,
+    limits: ImageLimits,
+) -> Option<CaptureReceiver> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let spawn = thread::Builder::new()
+        .name("amorphis-capture".into())
+        .spawn(move || {
+            let result = captures
+                .into_iter()
+                .map(|capture| {
+                    let (root, mut image) = capture_to_rgba(capture, limits)?;
+                    effect
+                        .apply(&mut image, limits)
+                        .map_err(|error| format!("could not apply capture effect: {error}"))?;
+                    Ok((root, image))
+                })
+                .collect();
+            let _ = sender.send(result);
+        });
+    if let Err(error) = spawn {
+        eprintln!(
+            "amorphis: could not start capture processor: {error}; retaining solid background"
+        );
+        return None;
+    }
+    Some(receiver)
 }
 
 fn render_background(
@@ -784,5 +944,12 @@ mod tests {
             composite_rgb([200, 100, 50, 255], [10, 20, 30, 255]),
             [200, 100, 50]
         );
+    }
+
+    #[test]
+    fn expanded_x11_components_convert_back_to_eight_bits() {
+        assert_eq!(component_to_u8(0), 0);
+        assert_eq!(component_to_u8(0x8080), 128);
+        assert_eq!(component_to_u8(u16::MAX), 255);
     }
 }

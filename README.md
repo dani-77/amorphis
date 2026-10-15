@@ -95,6 +95,17 @@ amorphis --backend wayland --image /path/to/background.png \
   --effect blur-pixelate --blur-radius 16 --pixel-size 16
 ```
 
+On X11, capture the current desktop before covering it and apply the same
+effects in memory:
+
+```sh
+amorphis --backend x11 --capture \
+  --effect blur-pixelate --blur-radius 16 --pixel-size 16
+```
+
+Desktop capture is not available on Wayland yet. Requesting `--capture` there
+fails before a session lock is requested.
+
 The effects also work with the embedded image when `--image` is omitted. Use
 the final solid-colour fallback explicitly with:
 
@@ -113,8 +124,9 @@ The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
 embedded fallback, a 7680×4320 custom PNG, and combined blur/pixelation. The
 X11 path has been tested in a real Xorg session with keyboard and pointer
 capture, PAM unlock, the embedded fallback, blur, and pixelation. The wider
-security matrix still requires live testing, and desktop capture is not
-implemented yet.
+security matrix still requires live testing. X11 desktop capture is implemented
+and has been smoke-tested under Xephyr, but still awaits a real-session Xorg
+test; Wayland desktop capture is not implemented.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on

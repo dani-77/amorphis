@@ -1,7 +1,7 @@
 //! Wayland backend using `ext-session-lock-v1` exclusively.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
-use crate::background::{LOCK_COLOR, StaticBackground, start_loader};
+use crate::background::{BackgroundSource, LOCK_COLOR, StaticBackground, start_loader};
 use crate::image::{FitMode, ImageLimits, RgbaImage};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
@@ -43,6 +43,7 @@ pub enum WaylandError {
     LockRefused,
     AuthenticationWorker(String),
     AuthenticationStopped,
+    CaptureUnsupported,
     ProtocolState,
     ConnectionLost(String),
 }
@@ -67,6 +68,9 @@ impl fmt::Display for WaylandError {
             Self::AuthenticationStopped => {
                 f.write_str("authentication worker stopped while the session was locked")
             }
+            Self::CaptureUnsupported => {
+                f.write_str("desktop capture is not supported by the Wayland backend yet")
+            }
             Self::ProtocolState => f.write_str("invalid internal lock-state transition"),
             Self::ConnectionLost(message) => write!(f, "Wayland connection failed: {message}"),
         }
@@ -82,6 +86,14 @@ pub fn run(
     username: &str,
     static_background: Option<StaticBackground>,
 ) -> Result<(), WaylandError> {
+    if matches!(
+        static_background
+            .as_ref()
+            .map(|background| &background.source),
+        Some(BackgroundSource::DesktopCapture)
+    ) {
+        return Err(WaylandError::CaptureUnsupported);
+    }
     let conn =
         Connection::connect_to_env().map_err(|error| WaylandError::Connect(error.to_string()))?;
     let (globals, event_queue) =

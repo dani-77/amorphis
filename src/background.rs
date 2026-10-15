@@ -12,6 +12,7 @@ const FALLBACK_PNG: &[u8] = include_bytes!("../assets/amorphis-fallback.png");
 pub enum BackgroundSource {
     File(PathBuf),
     EmbeddedFallback,
+    DesktopCapture,
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +61,9 @@ pub(crate) fn load_background(
     limits: ImageLimits,
 ) -> Result<RgbaImage, String> {
     match source {
+        BackgroundSource::DesktopCapture => {
+            Err("desktop capture requires backend support".to_owned())
+        }
         BackgroundSource::EmbeddedFallback => {
             load_png_bytes(FALLBACK_PNG, limits).map_err(|error| error.to_string())
         }

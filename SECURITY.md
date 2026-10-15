@@ -22,3 +22,8 @@ handling, and re-raising on other top-level activity. Killing Amorphis,
 switching VT, terminating/resetting the X server, or a sufficiently privileged
 X11 client may bypass it depending on system policy. Unlike Wayland session
 lock, client death cannot remain fail-closed.
+
+Optional X11 desktop capture freezes the server only while copying each root
+and mapping the opaque lock windows. Pixel conversion and visual effects run
+after coverage in a worker. Capture failure falls back to the embedded image
+and then to the opaque solid background without cancelling the lock.

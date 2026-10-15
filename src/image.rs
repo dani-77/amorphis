@@ -174,6 +174,10 @@ impl RgbaImage {
         &self.pixels
     }
 
+    pub(crate) fn pixels_mut(&mut self) -> &mut [u8] {
+        &mut self.pixels
+    }
+
     /// Average each complete or partial block independently.
     pub fn pixelate(&mut self, block_size: NonZeroU32) {
         let block = block_size.get() as usize;

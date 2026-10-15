@@ -361,9 +361,12 @@ Concluído no primeiro incremento da Fase B:
 - efeitos de blur e pixelização ligados à CLI comum dos dois backends;
 - backend X11 com fundos sólidos/PNG, grabs verificados, XKB, múltiplos X
   screens e RandR;
+- captura do root X11 em memória, com transição curta protegida por
+  `GrabServer`, fallback incorporado e efeitos processados depois da cobertura;
 - desativação de core dumps antes de aceitar input sensível;
 - testes unitários, `clippy -D warnings` e build otimizada.
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,
-multi-monitor, suspend/resume e PAM por distribuição; captura do desktop,
-feedback visual e endurecimento final de empacotamento.
+multi-monitor, suspend/resume e PAM por distribuição; validação real da captura
+X11 fora de Xephyr, captura Wayland, feedback visual e endurecimento final de
+empacotamento.

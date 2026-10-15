@@ -17,7 +17,7 @@ fn main() -> ExitCode {
         }
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland|x11 [--image PATH.png | --solid]\n                                [--fit cover|contain|center]\n                                [--effect none|blur|pixelate|blur-pixelate]\n                                [--blur-radius 1..=128]\n                                [--pixel-size N]\n  amorphis --help\n  amorphis --version\n\nBoth backends use the embedded fallback image unless --image or --solid is selected.\nEffects apply to the selected PNG. Defaults: --effect none, --blur-radius 16,\n--pixel-size 16. Both backends require the PAM service {PAM_SERVICE_FILE}.\nTest development builds carefully before relying on them.",
+                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland|x11 [--image PATH.png | --capture | --solid]\n                                [--fit cover|contain|center]\n                                [--effect none|blur|pixelate|blur-pixelate]\n                                [--blur-radius 1..=128]\n                                [--pixel-size N]\n  amorphis --help\n  amorphis --version\n\nBoth backends use the embedded fallback image unless --image or --solid is selected.\nX11 also supports --capture; Wayland currently rejects it before locking. Effects\napply to the selected background. Defaults: --effect none, --blur-radius 16,\n--pixel-size 16. Both backends require the PAM service {PAM_SERVICE_FILE}.\nTest development builds carefully before relying on them.",
                 env!("CARGO_PKG_VERSION")
             );
             ExitCode::SUCCESS
@@ -98,6 +98,7 @@ fn lock_identity() -> Option<String> {
 
 fn parse_background(arguments: &[String]) -> Result<Option<StaticBackground>, &'static str> {
     let mut image: Option<PathBuf> = None;
+    let mut capture = false;
     let mut solid = false;
     let mut fit = FitMode::Cover;
     let mut fit_was_set = false;
@@ -132,6 +133,11 @@ fn parse_background(arguments: &[String]) -> Result<Option<StaticBackground>, &'
                 index += 2;
             }
             "--image" => return Err("--image may only be specified once"),
+            "--capture" if !capture => {
+                capture = true;
+                index += 1;
+            }
+            "--capture" => return Err("--capture may only be specified once"),
             "--solid" if !solid => {
                 solid = true;
                 index += 1;
@@ -206,17 +212,26 @@ fn parse_background(arguments: &[String]) -> Result<Option<StaticBackground>, &'
 
     if solid {
         if image.is_some()
+            || capture
             || fit_was_set
             || effect_name.is_some()
             || blur_radius.is_some()
             || pixel_size.is_some()
         {
-            return Err("--solid cannot be combined with image options");
+            return Err("--solid cannot be combined with background options");
         }
         return Ok(None);
     }
 
-    let source = image.map_or(BackgroundSource::EmbeddedFallback, BackgroundSource::File);
+    if capture && image.is_some() {
+        return Err("--capture cannot be combined with --image");
+    }
+
+    let source = if capture {
+        BackgroundSource::DesktopCapture
+    } else {
+        image.map_or(BackgroundSource::EmbeddedFallback, BackgroundSource::File)
+    };
     Ok(Some(StaticBackground {
         source,
         fit,
@@ -279,6 +294,24 @@ mod tests {
                 block_size: NonZeroU32::new(12).unwrap(),
             }
         );
+    }
+
+    #[test]
+    fn parses_capture_with_effects_and_rejects_conflicting_sources() {
+        let parsed = parse_background(&arguments(&["--capture", "--effect", "blur-pixelate"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.source, BackgroundSource::DesktopCapture);
+        assert_eq!(
+            parsed.effect,
+            ImageEffect::BlurPixelate {
+                radius: 16,
+                block_size: NonZeroU32::new(16).unwrap(),
+            }
+        );
+
+        assert!(parse_background(&arguments(&["--capture", "--image", "wall.png"])).is_err());
+        assert!(parse_background(&arguments(&["--capture", "--solid"])).is_err());
     }
 
     #[test]
