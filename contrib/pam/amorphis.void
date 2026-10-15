@@ -1,0 +1,3 @@
+# PAM policy for Amorphis on Void Linux.
+auth include system-auth
+account include system-auth

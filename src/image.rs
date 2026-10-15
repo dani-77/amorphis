@@ -10,6 +10,32 @@ use std::path::Path;
 pub type Rgba = [u8; 4];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageEffect {
+    None,
+    Blur { radius: u32 },
+    Pixelate { block_size: NonZeroU32 },
+    BlurPixelate { radius: u32, block_size: NonZeroU32 },
+}
+
+impl ImageEffect {
+    pub fn apply(self, image: &mut RgbaImage, limits: ImageLimits) -> Result<(), ImageError> {
+        match self {
+            Self::None => Ok(()),
+            Self::Blur { radius } => image.box_blur(radius, limits),
+            Self::Pixelate { block_size } => {
+                image.pixelate(block_size);
+                Ok(())
+            }
+            Self::BlurPixelate { radius, block_size } => {
+                image.box_blur(radius, limits)?;
+                image.pixelate(block_size);
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImageLimits {
     pub max_width: u32,
     pub max_height: u32,
@@ -552,6 +578,30 @@ mod tests {
         let mut tight = LIMITS;
         tight.max_scratch_bytes = 31;
         assert_eq!(image.box_blur(1, tight), Err(ImageError::ScratchLimit));
+    }
+
+    #[test]
+    fn combined_effect_blurs_before_pixelating() {
+        let source = RgbaImage::from_rgba(
+            3,
+            1,
+            vec![0, 0, 0, 255, 90, 90, 90, 255, 210, 210, 210, 255],
+            LIMITS,
+        )
+        .unwrap();
+        let mut expected = source.clone();
+        expected.box_blur(1, LIMITS).unwrap();
+        expected.pixelate(NonZeroU32::new(2).unwrap());
+
+        let mut actual = source;
+        ImageEffect::BlurPixelate {
+            radius: 1,
+            block_size: NonZeroU32::new(2).unwrap(),
+        }
+        .apply(&mut actual, LIMITS)
+        .unwrap();
+
+        assert_eq!(actual, expected);
     }
 
     #[test]

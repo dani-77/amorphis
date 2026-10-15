@@ -8,8 +8,10 @@ pixelated backgrounds.
 
 The project is under construction. It now has an early Wayland path using
 `ext-session-lock-v1` and an early X11 path with verified keyboard/pointer
-grabs, both sharing PAM authentication and a fail-closed state machine. It has
-not yet had the real-server test matrix or security review required for
+grabs, both sharing PAM authentication and a fail-closed state machine. The
+Wayland path has been smoke-tested on Wasp 0.9.1 / wlroots 0.20.2 with a solid
+background and with a 7680x4320 PNG using combined blur and pixelation. It has
+not yet completed the real-server test matrix or security review required for
 production use. Do not rely on it to protect an important session yet.
 
 The implementation direction and security constraints are documented in:
@@ -42,6 +44,18 @@ cargo run -- --backend wayland --image /path/to/background.png --fit cover
 
 The fit modes are `cover` (default), `contain`, and `center`. A missing, invalid,
 or oversized image is non-fatal and leaves the solid background in place.
+Blur and pixelation run in the same bounded background worker, after decoding,
+so neither delays the initial opaque lock frame:
+
+```sh
+cargo run -- --backend wayland --image /path/to/background.png \
+  --effect blur-pixelate --blur-radius 16 --pixel-size 16
+```
+
+The effects are `none` (default), `blur`, `pixelate`, and `blur-pixelate`.
+Blur radius is limited to `1..=128`; pixel size must be a positive integer.
+Effect options currently apply only to a static Wayland PNG. Desktop capture
+and X11 image backgrounds are not implemented yet.
 
 The command refuses to request a lock when `/etc/pam.d/amorphis` is absent. It
 also refuses Wayland compositors without `ext-session-lock-v1`; there is no

@@ -12,6 +12,13 @@ auth include system-auth
 account include system-auth
 ```
 
+The repository includes those contents in `contrib/pam/amorphis.void`. On
+Void Linux, install it with:
+
+```sh
+sudo install -o root -g root -m 0644 contrib/pam/amorphis.void /etc/pam.d/amorphis
+```
+
 Debian-family systems commonly use:
 
 ```pam

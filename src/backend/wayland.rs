@@ -1,7 +1,7 @@
 //! Wayland backend using `ext-session-lock-v1` exclusively.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
-use crate::image::{FitMode, ImageLimits, RgbaImage, load_png};
+use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage, load_png};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use smithay_client_toolkit::{
@@ -39,6 +39,7 @@ const LOCK_COLOR: [u8; 4] = [18, 18, 20, 255];
 pub struct StaticBackground {
     pub path: PathBuf,
     pub fit: FitMode,
+    pub effect: ImageEffect,
 }
 
 #[derive(Debug)]
@@ -261,6 +262,9 @@ impl WaylandApp {
             qh,
         );
         surface.wl_surface().attach(Some(&buffer), 0, 0);
+        surface
+            .wl_surface()
+            .damage_buffer(0, 0, width_i32, height_i32);
         surface.wl_surface().commit();
         buffer.destroy();
         Ok(())
@@ -299,6 +303,9 @@ impl WaylandApp {
             qh,
         );
         surface.wl_surface().attach(Some(&buffer), 0, 0);
+        surface
+            .wl_surface()
+            .damage_buffer(0, 0, width_i32, height_i32);
         surface.wl_surface().commit();
         buffer.destroy();
         Ok(())
@@ -727,7 +734,15 @@ fn start_background_loader(
     let spawn = thread::Builder::new()
         .name("amorphis-image".into())
         .spawn(move || {
-            let result = load_png(&background.path, limits).map_err(|error| error.to_string());
+            let result = load_png(&background.path, limits)
+                .map_err(|error| error.to_string())
+                .and_then(|mut image| {
+                    background
+                        .effect
+                        .apply(&mut image, limits)
+                        .map_err(|error| format!("could not apply image effect: {error}"))?;
+                    Ok(image)
+                });
             let _ = sender.send(result);
         });
     if let Err(error) = spawn {

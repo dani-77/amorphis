@@ -1,5 +1,6 @@
-use amorphis::image::FitMode;
+use amorphis::image::{FitMode, ImageEffect, ImageLimits};
 use amorphis::{backend, system};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -15,7 +16,7 @@ fn main() -> ExitCode {
         }
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland [--image PATH.png]\n                            [--fit cover|contain|center]\n  amorphis --backend x11\n  amorphis --help\n  amorphis --version\n\nBoth backends require the PAM service {PAM_SERVICE_FILE}.\nTest development builds in a nested compositor or X server first.",
+                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland [--image PATH.png]\n                            [--fit cover|contain|center]\n                            [--effect none|blur|pixelate|blur-pixelate]\n                            [--blur-radius 1..=128]\n                            [--pixel-size N]\n  amorphis --backend x11\n  amorphis --help\n  amorphis --version\n\nEffects currently apply to a Wayland PNG background. Defaults: --effect none,\n--blur-radius 16, --pixel-size 16. Both backends require the PAM service\n{PAM_SERVICE_FILE}. Test development builds carefully before relying on them.",
                 env!("CARGO_PKG_VERSION")
             );
             ExitCode::SUCCESS
@@ -92,6 +93,9 @@ fn parse_background(
     let mut image: Option<PathBuf> = None;
     let mut fit = FitMode::Cover;
     let mut fit_was_set = false;
+    let mut effect_name: Option<&str> = None;
+    let mut blur_radius: Option<u32> = None;
+    let mut pixel_size: Option<NonZeroU32> = None;
     let mut index = 0;
 
     while index < arguments.len() {
@@ -121,13 +125,85 @@ fn parse_background(
             }
             "--image" => return Err("--image may only be specified once"),
             "--fit" => return Err("--fit may only be specified once"),
+            "--effect" if effect_name.is_none() => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or("--effect requires none, blur, pixelate, or blur-pixelate")?;
+                match value.as_str() {
+                    "none" | "blur" | "pixelate" | "blur-pixelate" => {
+                        effect_name = Some(value);
+                    }
+                    _ => {
+                        return Err("--effect requires none, blur, pixelate, or blur-pixelate");
+                    }
+                }
+                index += 2;
+            }
+            "--blur-radius" if blur_radius.is_none() => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or("--blur-radius requires an integer from 1 to 128")?;
+                let parsed = value
+                    .parse::<u32>()
+                    .map_err(|_| "--blur-radius requires an integer from 1 to 128")?;
+                if parsed == 0 || parsed > ImageLimits::default().max_blur_radius {
+                    return Err("--blur-radius requires an integer from 1 to 128");
+                }
+                blur_radius = Some(parsed);
+                index += 2;
+            }
+            "--pixel-size" if pixel_size.is_none() => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or("--pixel-size requires a positive integer")?;
+                let parsed = value
+                    .parse::<u32>()
+                    .ok()
+                    .and_then(NonZeroU32::new)
+                    .ok_or("--pixel-size requires a positive integer")?;
+                pixel_size = Some(parsed);
+                index += 2;
+            }
+            "--effect" => return Err("--effect may only be specified once"),
+            "--blur-radius" => return Err("--blur-radius may only be specified once"),
+            "--pixel-size" => return Err("--pixel-size may only be specified once"),
             _ => return Err("unknown Wayland option"),
         }
     }
 
+    let effect = match effect_name.unwrap_or("none") {
+        "none" if blur_radius.is_some() || pixel_size.is_some() => {
+            return Err("effect parameters require a matching --effect");
+        }
+        "none" => ImageEffect::None,
+        "blur" if pixel_size.is_some() => return Err("--pixel-size requires a pixelate effect"),
+        "blur" => ImageEffect::Blur {
+            radius: blur_radius.unwrap_or(16),
+        },
+        "pixelate" if blur_radius.is_some() => return Err("--blur-radius requires a blur effect"),
+        "pixelate" => ImageEffect::Pixelate {
+            block_size: pixel_size.unwrap_or(NonZeroU32::new(16).unwrap()),
+        },
+        "blur-pixelate" => ImageEffect::BlurPixelate {
+            radius: blur_radius.unwrap_or(16),
+            block_size: pixel_size.unwrap_or(NonZeroU32::new(16).unwrap()),
+        },
+        _ => unreachable!("effect names are validated while parsing"),
+    };
+
     match image {
-        Some(path) => Ok(Some(backend::wayland::StaticBackground { path, fit })),
-        None if fit_was_set => Err("--fit requires --image"),
+        Some(path) => Ok(Some(backend::wayland::StaticBackground {
+            path,
+            fit,
+            effect,
+        })),
+        None if fit_was_set
+            || effect_name.is_some()
+            || blur_radius.is_some()
+            || pixel_size.is_some() =>
+        {
+            Err("image options require --image")
+        }
         None => Ok(None),
     }
 }
@@ -147,10 +223,62 @@ mod tests {
             .unwrap();
         assert_eq!(parsed.path, PathBuf::from("wall.png"));
         assert_eq!(parsed.fit, FitMode::Contain);
+        assert_eq!(parsed.effect, ImageEffect::None);
     }
 
     #[test]
     fn fit_without_image_is_rejected() {
         assert!(parse_background(&arguments(&["--fit", "center"])).is_err());
+    }
+
+    #[test]
+    fn parses_combined_effect_with_explicit_parameters() {
+        let parsed = parse_background(&arguments(&[
+            "--image",
+            "wall.png",
+            "--effect",
+            "blur-pixelate",
+            "--blur-radius",
+            "24",
+            "--pixel-size",
+            "12",
+        ]))
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            parsed.effect,
+            ImageEffect::BlurPixelate {
+                radius: 24,
+                block_size: NonZeroU32::new(12).unwrap(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_effect_parameters_that_would_be_ignored() {
+        assert!(
+            parse_background(&arguments(&[
+                "--image",
+                "wall.png",
+                "--effect",
+                "pixelate",
+                "--blur-radius",
+                "4",
+            ]))
+            .is_err()
+        );
+        assert!(parse_background(&arguments(&["--effect", "blur"])).is_err());
+        assert!(
+            parse_background(&arguments(&[
+                "--image",
+                "wall.png",
+                "--effect",
+                "blur",
+                "--blur-radius",
+                "129",
+            ]))
+            .is_err()
+        );
     }
 }
