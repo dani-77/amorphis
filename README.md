@@ -1,27 +1,125 @@
-<p align="center">
-  <img src="assets/amorphis-logo.png" alt="Amorphis logo" width="360">
-</p>
+<p align="center"><img src="assets/amorphis-logo.png" width="96" alt="Amorphis logo"></p>
 
-# Amorphis
+<h1 align="center">Amorphis</h1>
 
-Amorphis is intended to become a small, fail-closed screen locker with real
-Wayland and X11 backends, PAM authentication, and optional blurred or
-pixelated backgrounds.
+<p align="center">A small, fail-closed screen locker for Wayland and X11.</p>
+
+---
+
+Amorphis is a security-first screen locker in the spirit of `slock`: one small
+program, PAM authentication, real locking mechanisms for both display systems,
+and optional blurred or pixelated backgrounds without turning the lock screen
+into a desktop shell.
+
+It is still pre-release software. The Wayland backend has been smoke-tested on
+Wasp, but the full compositor, multi-monitor, suspend/resume, and hostile-input
+test matrix is not complete. Do not yet rely on Amorphis as the sole protection
+for an important session.
+
+## Features
+
+- **Real Wayland locking** — uses `ext-session-lock-v1`; it never substitutes a
+  fullscreen, layer-shell, or XWayland window for a session lock.
+- **Real X11 backend** — creates opaque override-redirect windows and verifies
+  both keyboard and pointer grabs, with RandR resize handling.
+- **PAM authentication** — shares one fail-closed authentication path across
+  both backends and never places passwords in logs, arguments, or files.
+- **Safe background fallback** — custom PNG → embedded branded image → opaque
+  solid colour. A broken or oversized image never prevents the session locking.
+- **Blur and pixelation** — `blur`, `pixelate`, or both, processed in a bounded
+  worker after the first opaque frame is established.
+- **Predictable image fitting** — `cover`, `contain`, and `center`, with explicit
+  image dimension and memory limits.
+
+## Installing
+
+<details>
+<summary><b>Void Linux</b></summary>
+
+Install the build dependencies:
+
+```sh
+sudo xbps-install -S rust cargo pkg-config pam-devel \
+  libxkbcommon-devel libxcb-devel wayland-devel
+```
+
+Build and install Amorphis and its PAM policy:
+
+```sh
+git clone https://github.com/dani-77/amorphis.git
+cd amorphis
+cargo build --release
+sudo install -Dm755 target/release/amorphis /usr/local/bin/amorphis
+sudo install -o root -g root -m0644 \
+  contrib/pam/amorphis.void /etc/pam.d/amorphis
+```
+</details>
+
+<details>
+<summary><b>Build from source (other distributions)</b></summary>
+
+Amorphis needs a Rust toolchain plus development headers for PAM, XKB Common,
+XCB, and Wayland. Package names vary by distribution.
+
+```sh
+git clone https://github.com/dani-77/amorphis.git
+cd amorphis
+cargo build --release
+```
+
+Before running it, install a distribution-appropriate PAM policy named
+`amorphis`. Starting points and the associated lockout warning are in
+[`contrib/pam/README.md`](contrib/pam/README.md).
+</details>
+
+## Using it
+
+Wayland uses the embedded branded background by default:
+
+```sh
+amorphis --backend wayland
+```
+
+Use a custom PNG and choose how it fits the output:
+
+```sh
+amorphis --backend wayland --image /path/to/background.png --fit cover
+```
+
+Apply blur, pixelation, or both:
+
+```sh
+amorphis --backend wayland --image /path/to/background.png \
+  --effect blur-pixelate --blur-radius 16 --pixel-size 16
+```
+
+The effects also work with the embedded image when `--image` is omitted. Use
+the final solid-colour fallback explicitly with:
+
+```sh
+amorphis --backend wayland --solid
+```
+
+The initial X11 backend currently uses a solid background:
+
+```sh
+amorphis --backend x11
+```
+
+Type the account password and press `Enter` to unlock. Input is deliberately
+hidden; `Backspace` removes one character, `Ctrl+U` or `Escape` clears the
+current entry, and a failed authentication attempt leaves the session locked.
 
 ## Current status
 
-The project is under construction. It now has an early Wayland path using
-`ext-session-lock-v1` and an early X11 path with verified keyboard/pointer
-grabs, both sharing PAM authentication and a fail-closed state machine. The
-Wayland path has been smoke-tested on Wasp 0.9.1 / wlroots 0.20.2 with a solid
-background and with a 7680x4320 PNG using combined blur and pixelation. It has
-not yet completed the real-server test matrix or security review required for
-production use. Do not rely on it to protect an important session yet.
+The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
+embedded fallback, a 7680×4320 custom PNG, and combined blur/pixelation. The
+X11 path and the wider security matrix still require live testing. Desktop
+capture is not implemented yet.
 
-The implementation direction and security constraints are documented in:
-
-- [`AMORPHIS_DIRECAO.md`](AMORPHIS_DIRECAO.md)
-- [`AMORPHIS_PROPOSTA_TECNICA.md`](AMORPHIS_PROPOSTA_TECNICA.md)
+See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
+retain a lock if the process or X server is killed; Wayland support depends on
+the compositor advertising `ext-session-lock-v1`.
 
 ## Development
 
@@ -31,55 +129,12 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-Before any live test, install a PAM policy named `amorphis`; examples and the
-associated warning are in [`contrib/pam/README.md`](contrib/pam/README.md).
-Then test in a nested compositor. Wayland uses the embedded branded fallback
-image by default:
+The design, security boundaries, implementation plan, and remaining acceptance
+tests are documented in:
 
-```sh
-cargo run -- --backend wayland
-```
+- [`AMORPHIS_DIRECAO.md`](AMORPHIS_DIRECAO.md)
+- [`AMORPHIS_PROPOSTA_TECNICA.md`](AMORPHIS_PROPOSTA_TECNICA.md)
 
-Use the final solid-colour fallback explicitly with:
+## License
 
-```sh
-cargo run -- --backend wayland --solid
-```
-
-Or use a PNG, decoded under explicit dimension and memory limits in a worker
-while the opaque lock frame is already being established:
-
-```sh
-cargo run -- --backend wayland --image /path/to/background.png --fit cover
-```
-
-The fit modes are `cover` (default), `contain`, and `center`. A missing, invalid,
-or oversized custom image is non-fatal and selects the embedded fallback. If
-that cannot be decoded or rendered either, the opaque solid background remains.
-Blur and pixelation run in the same bounded background worker, after decoding,
-so neither delays the initial opaque lock frame:
-
-```sh
-cargo run -- --backend wayland --image /path/to/background.png \
-  --effect blur-pixelate --blur-radius 16 --pixel-size 16
-```
-
-The effects are `none` (default), `blur`, `pixelate`, and `blur-pixelate`.
-Blur radius is limited to `1..=128`; pixel size must be a positive integer.
-Effect options currently apply to the embedded or custom Wayland PNG. Desktop
-capture and X11 image backgrounds are not implemented yet.
-
-The command refuses to request a lock when `/etc/pam.d/amorphis` is absent. It
-also refuses Wayland compositors without `ext-session-lock-v1`; there is no
-layer-shell or XWayland fallback.
-
-The initial solid-colour X11 backend is selected explicitly:
-
-```sh
-cargo run -- --backend x11
-```
-
-It requires XKB and RandR, creates one opaque window per X screen, and verifies
-both input grabs before reporting the lock as established. X11 cannot retain a
-lock if this process or the X server is killed; see [`SECURITY.md`](SECURITY.md).
-
+MIT — see [LICENSE](LICENSE).
