@@ -12,9 +12,9 @@ and optional blurred or pixelated backgrounds without turning the lock screen
 into a desktop shell.
 
 It is still pre-release software. The Wayland backend has been smoke-tested on
-Wasp, but the full compositor, multi-monitor, suspend/resume, and hostile-input
-test matrix is not complete. Do not yet rely on Amorphis as the sole protection
-for an important session.
+Wasp and the solid X11 backend on Xorg, but the full compositor, multi-monitor,
+suspend/resume, and hostile-input test matrix is not complete. Do not yet rely
+on Amorphis as the sole protection for an important session.
 
 ## Features
 
@@ -114,8 +114,9 @@ current entry, and a failed authentication attempt leaves the session locked.
 
 The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
 embedded fallback, a 7680×4320 custom PNG, and combined blur/pixelation. The
-X11 path and the wider security matrix still require live testing. Desktop
-capture is not implemented yet.
+solid X11 path has been tested in a real Xorg session with keyboard and pointer
+capture plus PAM unlock. The wider security matrix still requires live testing,
+and desktop capture is not implemented yet.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on
