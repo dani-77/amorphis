@@ -28,6 +28,9 @@ on Amorphis as the sole protection for an important session.
   solid colour. A broken or oversized image never prevents the session locking.
 - **Blur and pixelation** — `blur`, `pixelate`, or both, processed in a bounded
   worker after the first opaque frame is established.
+- **Per-output desktop capture** — X11 root capture and native Wayland capture
+  through `ext-image-copy-capture-v1`, with no portal prompt or screenshot
+  daemon.
 - **Predictable image fitting** — `cover`, `contain`, and `center`, with explicit
   image dimension and memory limits.
 
@@ -95,16 +98,19 @@ amorphis --backend wayland --image /path/to/background.png \
   --effect blur-pixelate --blur-radius 16 --pixel-size 16
 ```
 
-On X11, capture the current desktop before covering it and apply the same
-effects in memory:
+Capture the current desktop before covering it and apply the same effects in
+memory:
 
 ```sh
-amorphis --backend x11 --capture \
+amorphis --backend wayland --capture \
   --effect blur-pixelate --blur-radius 16 --pixel-size 16
 ```
 
-Desktop capture is not available on Wayland yet. Requesting `--capture` there
-fails before a session lock is requested.
+Replace `wayland` with `x11` to use X11 root capture. On Wayland, `--capture`
+requires both `ext-output-image-capture-source-v1` and
+`ext-image-copy-capture-v1`. If capture is unavailable, refused, times out, or
+offers no supported SHM format, Amorphis uses the embedded image and finally
+the solid colour without cancelling the lock.
 
 The effects also work with the embedded image when `--image` is omitted. Use
 the final solid-colour fallback explicitly with:
@@ -121,12 +127,13 @@ current entry, and a failed authentication attempt leaves the session locked.
 ## Current status
 
 The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
-embedded fallback, a 7680×4320 custom PNG, and combined blur/pixelation. The
-X11 path has been tested in a real Xorg session with keyboard and pointer
-capture, PAM unlock, the embedded fallback, blur, and pixelation. The wider
-security matrix still requires live testing. X11 desktop capture is implemented
-and has been smoke-tested under Xephyr, but still awaits a real-session Xorg
-test; Wayland desktop capture is not implemented.
+embedded fallback, a 7680×4320 custom PNG, native desktop capture, and combined
+blur/pixelation. The X11 path has been tested in a real Xorg session with
+keyboard and pointer capture, PAM unlock, the embedded fallback, blur, and
+pixelation. The wider security matrix still requires live testing. X11 desktop
+capture has been smoke-tested under Xephyr, but still awaits a real-session
+Xorg test. Wayland capture still needs multi-monitor and broader compositor
+testing.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on

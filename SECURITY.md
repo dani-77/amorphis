@@ -15,6 +15,12 @@ The Wayland backend only uses `ext-session-lock-v1`. It never substitutes a
 normal fullscreen, layer-shell, or XWayland window for a real session lock.
 After lock confirmation, errors never call the protocol's unlock operation;
 only successful PAM authentication and account validation can reach it.
+Optional Wayland desktop capture uses `ext-image-copy-capture-v1` with
+`ext-output-image-capture-source-v1`. It captures each advertised output before
+requesting the session lock, excludes the pointer, retains no screenshot after
+the process exits, and processes effects only after the lock request begins.
+Unsupported protocols, formats, transforms, timeouts, and runtime failures fall
+back to the embedded image and then the opaque solid background.
 
 The X11 backend provides weaker guarantees inherent to X11. It uses opaque
 override-redirect windows, verified keyboard and pointer grabs, RandR resize

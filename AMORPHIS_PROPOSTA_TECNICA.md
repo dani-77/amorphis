@@ -186,7 +186,7 @@ Uma imagem estática pode substituir o buffer sólido depois de descodificada. S
 5. Manter tentativas de elevação perante alterações de subestrutura.
 6. Apenas terminar após PAM bem-sucedido.
 
-Para a futura captura, estudar uma secção crítica curta com `GrabServer`: capturar o root, obter os grabs, mapear as janelas e sincronizar antes de libertar o servidor. Mesmo assim, X11 não recebe garantias equivalentes a Wayland; VT switching, reset/encerramento do servidor e clientes com acesso ao mesmo servidor continuam limitações documentadas.
+A captura implementada usa uma secção crítica curta com `GrabServer`: captura o root, obtém os grabs, mapeia as janelas e sincroniza antes de libertar o servidor. Mesmo assim, X11 não recebe garantias equivalentes a Wayland; VT switching, reset/encerramento do servidor e clientes com acesso ao mesmo servidor continuam limitações documentadas.
 
 ## 7. Política de fundos e captura
 
@@ -204,11 +204,11 @@ Modos iniciais para a imagem:
 - `contain`: mostra tudo e preenche margens com a cor;
 - `center`: sem escala, com corte/margens opacas.
 
-Captura Wayland será uma capacidade opcional, nunca condição para bloquear:
+A captura Wayland é uma capacidade opcional, nunca condição para bloquear:
 
 - preferir `ext-image-copy-capture-v1` + `ext-output-image-capture-source-v1` quando ambos forem anunciados e a política do compositor autorizar;
 - captura por portal exige normalmente seleção/consentimento e PipeWire, aumentando dependências e latência; não faz parte do MVP automático;
-- fluxo futuro: capturar rapidamente para memória → pedir session lock → mostrar buffers sólidos → processar blur/pixelização já bloqueado → substituir buffers;
+- fluxo implementado: capturar rapidamente para memória → pedir session lock → mostrar buffers sólidos → processar blur/pixelização já bloqueado → substituir buffers;
 - impor timeout curto; qualquer ausência, recusa ou falha segue diretamente para imagem estática/cor.
 
 Não criar um daemon residente apenas para manter screenshots recentes: seria complexidade e retenção de conteúdo sensível desnecessárias.
@@ -363,10 +363,12 @@ Concluído no primeiro incremento da Fase B:
   screens e RandR;
 - captura do root X11 em memória, com transição curta protegida por
   `GrabServer`, fallback incorporado e efeitos processados depois da cobertura;
+- captura Wayland por output com `ext-image-copy-capture-v1`, timeout curto,
+  fallback incorporado e efeitos processados depois do pedido de session lock;
 - desativação de core dumps antes de aceitar input sensível;
 - testes unitários, `clippy -D warnings` e build otimizada.
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,
 multi-monitor, suspend/resume e PAM por distribuição; validação real da captura
-X11 fora de Xephyr, captura Wayland, feedback visual e endurecimento final de
-empacotamento.
+X11 fora de Xephyr, captura Wayland fora de Wasp/wlroots, feedback visual e
+endurecimento final de empacotamento.

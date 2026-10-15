@@ -17,6 +17,7 @@ dependencies = [
  "pam-client2",
  "smithay-client-toolkit",
  "wayland-client",
+ "wayland-protocols",
  "x11rb",
  "xkbcommon",
 ]

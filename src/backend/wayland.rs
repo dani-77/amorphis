@@ -1,13 +1,16 @@
 //! Wayland backend using `ext-session-lock-v1` exclusively.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
-use crate::background::{BackgroundSource, LOCK_COLOR, StaticBackground, start_loader};
-use crate::image::{FitMode, ImageLimits, RgbaImage};
+use crate::backend::wayland_capture::{CapturedOutput, capture_outputs};
+use crate::background::{
+    BackgroundSource, LOCK_COLOR, StaticBackground, load_background, start_loader,
+};
+use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    output::{OutputHandler, OutputState},
+    output::{OutputData, OutputHandler, OutputState},
     reexports::{calloop::EventLoop, calloop_wayland_source::WaylandSource},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -21,12 +24,14 @@ use smithay_client_toolkit::{
     },
     shm::{Shm, ShmHandler, raw::RawPool},
 };
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 use std::time::Duration;
 use wayland_client::{
-    Connection, QueueHandle,
+    Connection, Proxy, QueueHandle,
     globals::registry_queue_init,
     protocol::{wl_buffer, wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface},
 };
@@ -43,7 +48,6 @@ pub enum WaylandError {
     LockRefused,
     AuthenticationWorker(String),
     AuthenticationStopped,
-    CaptureUnsupported,
     ProtocolState,
     ConnectionLost(String),
 }
@@ -68,9 +72,6 @@ impl fmt::Display for WaylandError {
             Self::AuthenticationStopped => {
                 f.write_str("authentication worker stopped while the session was locked")
             }
-            Self::CaptureUnsupported => {
-                f.write_str("desktop capture is not supported by the Wayland backend yet")
-            }
             Self::ProtocolState => f.write_str("invalid internal lock-state transition"),
             Self::ConnectionLost(message) => write!(f, "Wayland connection failed: {message}"),
         }
@@ -86,14 +87,12 @@ pub fn run(
     username: &str,
     static_background: Option<StaticBackground>,
 ) -> Result<(), WaylandError> {
-    if matches!(
-        static_background
-            .as_ref()
-            .map(|background| &background.source),
-        Some(BackgroundSource::DesktopCapture)
-    ) {
-        return Err(WaylandError::CaptureUnsupported);
-    }
+    let limits = ImageLimits::default();
+    let PreparedBackground {
+        shared_rx,
+        pending_capture,
+        fit,
+    } = prepare_background(static_background, limits);
     let conn =
         Connection::connect_to_env().map_err(|error| WaylandError::Connect(error.to_string()))?;
     let (globals, event_queue) =
@@ -108,7 +107,6 @@ pub fn run(
         .map_err(|error| WaylandError::AuthenticationWorker(error.to_string()))?;
     let secret = SecretBuffer::standard()
         .map_err(|error| WaylandError::AuthenticationWorker(error.to_string()))?;
-    let (background_rx, background_fit) = start_loader(static_background, ImageLimits::default());
     let mut event_loop: EventLoop<WaylandApp> =
         EventLoop::try_new().map_err(|error| WaylandError::EventLoop(error.to_string()))?;
 
@@ -128,10 +126,12 @@ pub fn run(
         active_attempt: None,
         secret,
         exit: None,
-        limits: ImageLimits::default(),
-        background_rx,
-        background_fit,
+        limits,
+        background_rx: shared_rx,
+        capture_rx: None,
+        background_fit: fit,
         background_image: None,
+        captured_images: HashMap::new(),
     };
 
     app.machine
@@ -147,6 +147,20 @@ pub fn run(
         }
     };
     app.session_lock = Some(lock);
+    if let Some((outputs, effect)) = pending_capture {
+        match start_capture_processor(outputs, effect, limits) {
+            Ok(receiver) => app.capture_rx = Some(receiver),
+            Err(error) => {
+                eprintln!("amorphis: {error}; using the embedded fallback background");
+                let fallback = StaticBackground {
+                    source: BackgroundSource::EmbeddedFallback,
+                    fit,
+                    effect,
+                };
+                (app.background_rx, _) = start_loader(Some(fallback), limits);
+            }
+        }
+    }
 
     let initial_outputs: Vec<_> = app.output_state.outputs().collect();
     for output in initial_outputs {
@@ -165,6 +179,7 @@ pub fn run(
             return exit;
         }
         app.poll_background(&qh);
+        app.poll_capture(&qh);
         app.poll_authentication(&conn)?;
 
         if let Some(exit) = app.exit.take() {
@@ -173,8 +188,90 @@ pub fn run(
     }
 }
 
+struct PreparedBackground {
+    shared_rx: Option<Receiver<Result<RgbaImage, String>>>,
+    pending_capture: Option<(Vec<CapturedOutput>, ImageEffect)>,
+    fit: FitMode,
+}
+
+fn prepare_background(
+    static_background: Option<StaticBackground>,
+    limits: ImageLimits,
+) -> PreparedBackground {
+    let Some(mut background) = static_background else {
+        return PreparedBackground {
+            shared_rx: None,
+            pending_capture: None,
+            fit: FitMode::Cover,
+        };
+    };
+    if background.source != BackgroundSource::DesktopCapture {
+        let (receiver, fit) = start_loader(Some(background), limits);
+        return PreparedBackground {
+            shared_rx: receiver,
+            pending_capture: None,
+            fit,
+        };
+    }
+
+    let fit = background.fit;
+    let effect = background.effect;
+    match capture_outputs(limits) {
+        Ok(outputs) => PreparedBackground {
+            shared_rx: None,
+            pending_capture: Some((outputs, effect)),
+            fit,
+        },
+        Err(error) => {
+            eprintln!("amorphis: {error}; using the embedded fallback background");
+            background.source = BackgroundSource::EmbeddedFallback;
+            let (receiver, _) = start_loader(Some(background), limits);
+            PreparedBackground {
+                shared_rx: receiver,
+                pending_capture: None,
+                fit,
+            }
+        }
+    }
+}
+
+fn start_capture_processor(
+    mut outputs: Vec<CapturedOutput>,
+    effect: ImageEffect,
+    limits: ImageLimits,
+) -> Result<Receiver<Result<CaptureBackground, String>>, String> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::Builder::new()
+        .name("amorphis-capture".into())
+        .spawn(move || {
+            let capture_result = outputs.iter_mut().try_for_each(|output| {
+                effect
+                    .apply(&mut output.image, limits)
+                    .map_err(|error| format!("could not apply capture effect: {error}"))
+            });
+            let result = match capture_result {
+                Ok(()) => Ok(CaptureBackground::PerOutput(outputs)),
+                Err(capture_error) => {
+                    eprintln!("amorphis: {capture_error}; using the embedded fallback background");
+                    load_background(&BackgroundSource::EmbeddedFallback, limits).and_then(
+                        |mut image| {
+                            effect.apply(&mut image, limits).map_err(|error| {
+                                format!("could not apply fallback image effect: {error}")
+                            })?;
+                            Ok(CaptureBackground::SharedFallback(image))
+                        },
+                    )
+                }
+            };
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("could not start Wayland capture processor: {error}"))?;
+    Ok(receiver)
+}
+
 struct LockedOutput {
     output: wl_output::WlOutput,
+    output_id: Option<u32>,
     // Retaining the protocol object keeps this output covered.
     _surface: SessionLockSurface,
     configured_size: Option<(u32, u32)>,
@@ -198,8 +295,15 @@ struct WaylandApp {
     exit: Option<Result<(), WaylandError>>,
     limits: ImageLimits,
     background_rx: Option<Receiver<Result<RgbaImage, String>>>,
+    capture_rx: Option<Receiver<Result<CaptureBackground, String>>>,
     background_fit: FitMode,
     background_image: Option<RgbaImage>,
+    captured_images: HashMap<u32, RgbaImage>,
+}
+
+enum CaptureBackground {
+    PerOutput(Vec<CapturedOutput>),
+    SharedFallback(RgbaImage),
 }
 
 impl WaylandApp {
@@ -212,8 +316,12 @@ impl WaylandApp {
         };
         let surface = self.compositor_state.create_surface(qh);
         let surface = lock.create_lock_surface(surface, &output, qh);
+        let output_id = output
+            .data::<OutputData>()
+            .map(|data| data.with_output_info(|info| info.id));
         self.surfaces.push(LockedOutput {
             output,
+            output_id,
             _surface: surface,
             configured_size: None,
         });
@@ -225,8 +333,12 @@ impl WaylandApp {
         surface: &SessionLockSurface,
         width: u32,
         height: u32,
+        output_id: Option<u32>,
     ) -> Result<(), &'static str> {
-        if let Some(source) = self.background_image.as_ref()
+        let source = output_id
+            .and_then(|id| self.captured_images.get(&id))
+            .or(self.background_image.as_ref());
+        if let Some(source) = source
             && let Ok(fitted) =
                 source.fitted(width, height, self.background_fit, LOCK_COLOR, self.limits)
             && self.render_rgba(qh, surface, &fitted).is_ok()
@@ -336,11 +448,14 @@ impl WaylandApp {
                     .filter_map(|entry| {
                         entry
                             .configured_size
-                            .map(|size| (entry._surface.clone(), size))
+                            .map(|size| (entry._surface.clone(), size, entry.output_id))
                     })
                     .collect();
-                for (surface, (width, height)) in surfaces {
-                    if self.render_current(qh, &surface, width, height).is_err() {
+                for (surface, (width, height), output_id) in surfaces {
+                    if self
+                        .render_current(qh, &surface, width, height, output_id)
+                        .is_err()
+                    {
                         eprintln!(
                             "amorphis: could not draw static PNG; retaining the previous opaque frame"
                         );
@@ -349,6 +464,60 @@ impl WaylandApp {
             }
             Err(error) => {
                 eprintln!("amorphis: {error}; retaining solid background");
+            }
+        }
+    }
+
+    fn poll_capture(&mut self, qh: &QueueHandle<Self>) {
+        let Some(receiver) = self.capture_rx.as_ref() else {
+            return;
+        };
+        let result = match receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.capture_rx = None;
+                eprintln!(
+                    "amorphis: Wayland capture processor stopped; retaining solid background"
+                );
+                return;
+            }
+        };
+        self.capture_rx = None;
+
+        match result {
+            Ok(CaptureBackground::PerOutput(outputs)) => {
+                self.captured_images = outputs
+                    .into_iter()
+                    .map(|output| (output.output_id, output.image))
+                    .collect();
+            }
+            Ok(CaptureBackground::SharedFallback(image)) => {
+                self.background_image = Some(image);
+            }
+            Err(error) => {
+                eprintln!("amorphis: {error}; retaining solid background");
+                return;
+            }
+        }
+
+        let surfaces: Vec<_> = self
+            .surfaces
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .configured_size
+                    .map(|size| (entry._surface.clone(), size, entry.output_id))
+            })
+            .collect();
+        for (surface, (width, height), output_id) in surfaces {
+            if self
+                .render_current(qh, &surface, width, height, output_id)
+                .is_err()
+            {
+                eprintln!(
+                    "amorphis: could not draw captured desktop; retaining the previous opaque frame"
+                );
             }
         }
     }
@@ -467,7 +636,21 @@ impl SessionLockHandler for WaylandApp {
         _serial: u32,
     ) {
         let (width, height) = configure.new_size;
-        let rendered = self.render_current(qh, &surface, width, height);
+        let output_id = self
+            .surfaces
+            .iter()
+            .find(|entry| entry._surface.wl_surface() == surface.wl_surface())
+            .and_then(|entry| entry.output_id);
+        let first_frame = self
+            .surfaces
+            .iter()
+            .find(|entry| entry._surface.wl_surface() == surface.wl_surface())
+            .is_none_or(|entry| entry.configured_size.is_none());
+        let rendered = if first_frame {
+            self.render_solid(qh, &surface, width, height)
+        } else {
+            self.render_current(qh, &surface, width, height, output_id)
+        };
         if rendered.is_ok()
             && let Some(entry) = self
                 .surfaces
