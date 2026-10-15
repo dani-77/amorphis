@@ -1,7 +1,7 @@
 //! Wayland backend using `ext-session-lock-v1` exclusively.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
-use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage, load_png};
+use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage, load_png, load_png_bytes};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use smithay_client_toolkit::{
@@ -34,10 +34,17 @@ use wayland_client::{
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const LOCK_COLOR: [u8; 4] = [18, 18, 20, 255];
+const FALLBACK_PNG: &[u8] = include_bytes!("../../assets/amorphis-fallback.png");
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BackgroundSource {
+    File(PathBuf),
+    EmbeddedFallback,
+}
 
 #[derive(Clone, Debug)]
 pub struct StaticBackground {
-    pub path: PathBuf,
+    pub source: BackgroundSource,
     pub fit: FitMode,
     pub effect: ImageEffect,
 }
@@ -734,15 +741,13 @@ fn start_background_loader(
     let spawn = thread::Builder::new()
         .name("amorphis-image".into())
         .spawn(move || {
-            let result = load_png(&background.path, limits)
-                .map_err(|error| error.to_string())
-                .and_then(|mut image| {
-                    background
-                        .effect
-                        .apply(&mut image, limits)
-                        .map_err(|error| format!("could not apply image effect: {error}"))?;
-                    Ok(image)
-                });
+            let result = load_background(&background.source, limits).and_then(|mut image| {
+                background
+                    .effect
+                    .apply(&mut image, limits)
+                    .map_err(|error| format!("could not apply image effect: {error}"))?;
+                Ok(image)
+            });
             let _ = sender.send(result);
         });
     if let Err(error) = spawn {
@@ -750,6 +755,25 @@ fn start_background_loader(
         return (None, fit);
     }
     (Some(receiver), fit)
+}
+
+fn load_background(source: &BackgroundSource, limits: ImageLimits) -> Result<RgbaImage, String> {
+    match source {
+        BackgroundSource::EmbeddedFallback => {
+            load_png_bytes(FALLBACK_PNG, limits).map_err(|error| error.to_string())
+        }
+        BackgroundSource::File(path) => match load_png(path, limits) {
+            Ok(image) => Ok(image),
+            Err(primary_error) => {
+                eprintln!("amorphis: {primary_error}; using the embedded fallback background");
+                load_png_bytes(FALLBACK_PNG, limits).map_err(|fallback_error| {
+                    format!(
+                        "custom PNG failed ({primary_error}) and embedded fallback failed ({fallback_error})"
+                    )
+                })
+            }
+        },
+    }
 }
 
 smithay_client_toolkit::delegate_compositor!(WaylandApp);
@@ -792,5 +816,12 @@ mod tests {
 
         let bytes = rgba_over_opaque_argb([200, 100, 50, 255], [10, 20, 30, 255]);
         assert_eq!(u32::from_ne_bytes(bytes), 0xffc8_6432);
+    }
+
+    #[test]
+    fn embedded_fallback_decodes_under_production_limits() {
+        let image = load_background(&BackgroundSource::EmbeddedFallback, ImageLimits::default())
+            .expect("embedded fallback must remain a valid bounded PNG");
+        assert_eq!((image.width(), image.height()), (1672, 941));
     }
 }

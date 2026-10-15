@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/amorphis-logo.png" alt="Amorphis logo" width="360">
+</p>
+
 # Amorphis
 
 Amorphis is intended to become a small, fail-closed screen locker with real
@@ -29,10 +33,17 @@ cargo fmt --check
 
 Before any live test, install a PAM policy named `amorphis`; examples and the
 associated warning are in [`contrib/pam/README.md`](contrib/pam/README.md).
-Then test in a nested compositor with a solid background:
+Then test in a nested compositor. Wayland uses the embedded branded fallback
+image by default:
 
 ```sh
 cargo run -- --backend wayland
+```
+
+Use the final solid-colour fallback explicitly with:
+
+```sh
+cargo run -- --backend wayland --solid
 ```
 
 Or use a PNG, decoded under explicit dimension and memory limits in a worker
@@ -43,7 +54,8 @@ cargo run -- --backend wayland --image /path/to/background.png --fit cover
 ```
 
 The fit modes are `cover` (default), `contain`, and `center`. A missing, invalid,
-or oversized image is non-fatal and leaves the solid background in place.
+or oversized custom image is non-fatal and selects the embedded fallback. If
+that cannot be decoded or rendered either, the opaque solid background remains.
 Blur and pixelation run in the same bounded background worker, after decoding,
 so neither delays the initial opaque lock frame:
 
@@ -54,8 +66,8 @@ cargo run -- --backend wayland --image /path/to/background.png \
 
 The effects are `none` (default), `blur`, `pixelate`, and `blur-pixelate`.
 Blur radius is limited to `1..=128`; pixel size must be a positive integer.
-Effect options currently apply only to a static Wayland PNG. Desktop capture
-and X11 image backgrounds are not implemented yet.
+Effect options currently apply to the embedded or custom Wayland PNG. Desktop
+capture and X11 image backgrounds are not implemented yet.
 
 The command refuses to request a lock when `/etc/pam.d/amorphis` is absent. It
 also refuses Wayland compositors without `ext-session-lock-v1`; there is no

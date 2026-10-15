@@ -3,7 +3,7 @@
 use std::error::Error;
 use std::fmt;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Seek};
+use std::io::{self, BufRead, BufReader, Cursor, Seek};
 use std::num::NonZeroU32;
 use std::path::Path;
 
@@ -269,6 +269,11 @@ impl RgbaImage {
 pub fn load_png(path: &Path, limits: ImageLimits) -> Result<RgbaImage, ImageLoadError> {
     let file = File::open(path).map_err(ImageLoadError::Open)?;
     decode_png(BufReader::new(file), limits)
+}
+
+/// Decode a PNG already resident in memory under the normal image limits.
+pub fn load_png_bytes(bytes: &[u8], limits: ImageLimits) -> Result<RgbaImage, ImageLoadError> {
+    decode_png(Cursor::new(bytes), limits)
 }
 
 fn decode_png<R: BufRead + Seek>(

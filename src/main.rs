@@ -1,3 +1,4 @@
+use amorphis::backend::wayland::BackgroundSource;
 use amorphis::image::{FitMode, ImageEffect, ImageLimits};
 use amorphis::{backend, system};
 use std::num::NonZeroU32;
@@ -16,7 +17,7 @@ fn main() -> ExitCode {
         }
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland [--image PATH.png]\n                            [--fit cover|contain|center]\n                            [--effect none|blur|pixelate|blur-pixelate]\n                            [--blur-radius 1..=128]\n                            [--pixel-size N]\n  amorphis --backend x11\n  amorphis --help\n  amorphis --version\n\nEffects currently apply to a Wayland PNG background. Defaults: --effect none,\n--blur-radius 16, --pixel-size 16. Both backends require the PAM service\n{PAM_SERVICE_FILE}. Test development builds carefully before relying on them.",
+                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland [--image PATH.png | --solid]\n                            [--fit cover|contain|center]\n                            [--effect none|blur|pixelate|blur-pixelate]\n                            [--blur-radius 1..=128]\n                            [--pixel-size N]\n  amorphis --backend x11\n  amorphis --help\n  amorphis --version\n\nWayland uses the embedded fallback image unless --image or --solid is selected.\nEffects apply to the selected PNG. Defaults: --effect none, --blur-radius 16,\n--pixel-size 16. Both backends require the PAM service {PAM_SERVICE_FILE}.\nTest development builds carefully before relying on them.",
                 env!("CARGO_PKG_VERSION")
             );
             ExitCode::SUCCESS
@@ -91,6 +92,7 @@ fn parse_background(
     arguments: &[String],
 ) -> Result<Option<backend::wayland::StaticBackground>, &'static str> {
     let mut image: Option<PathBuf> = None;
+    let mut solid = false;
     let mut fit = FitMode::Cover;
     let mut fit_was_set = false;
     let mut effect_name: Option<&str> = None;
@@ -124,6 +126,11 @@ fn parse_background(
                 index += 2;
             }
             "--image" => return Err("--image may only be specified once"),
+            "--solid" if !solid => {
+                solid = true;
+                index += 1;
+            }
+            "--solid" => return Err("--solid may only be specified once"),
             "--fit" => return Err("--fit may only be specified once"),
             "--effect" if effect_name.is_none() => {
                 let value = arguments
@@ -191,21 +198,24 @@ fn parse_background(
         _ => unreachable!("effect names are validated while parsing"),
     };
 
-    match image {
-        Some(path) => Ok(Some(backend::wayland::StaticBackground {
-            path,
-            fit,
-            effect,
-        })),
-        None if fit_was_set
+    if solid {
+        if image.is_some()
+            || fit_was_set
             || effect_name.is_some()
             || blur_radius.is_some()
-            || pixel_size.is_some() =>
+            || pixel_size.is_some()
         {
-            Err("image options require --image")
+            return Err("--solid cannot be combined with image options");
         }
-        None => Ok(None),
+        return Ok(None);
     }
+
+    let source = image.map_or(BackgroundSource::EmbeddedFallback, BackgroundSource::File);
+    Ok(Some(backend::wayland::StaticBackground {
+        source,
+        fit,
+        effect,
+    }))
 }
 
 #[cfg(test)]
@@ -221,14 +231,24 @@ mod tests {
         let parsed = parse_background(&arguments(&["--image", "wall.png", "--fit", "contain"]))
             .unwrap()
             .unwrap();
-        assert_eq!(parsed.path, PathBuf::from("wall.png"));
+        assert_eq!(
+            parsed.source,
+            BackgroundSource::File(PathBuf::from("wall.png"))
+        );
         assert_eq!(parsed.fit, FitMode::Contain);
         assert_eq!(parsed.effect, ImageEffect::None);
     }
 
     #[test]
-    fn fit_without_image_is_rejected() {
-        assert!(parse_background(&arguments(&["--fit", "center"])).is_err());
+    fn default_and_fit_without_path_use_embedded_fallback() {
+        let default = parse_background(&[]).unwrap().unwrap();
+        assert_eq!(default.source, BackgroundSource::EmbeddedFallback);
+
+        let centered = parse_background(&arguments(&["--fit", "center"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(centered.source, BackgroundSource::EmbeddedFallback);
+        assert_eq!(centered.fit, FitMode::Center);
     }
 
     #[test]
@@ -268,7 +288,10 @@ mod tests {
             ]))
             .is_err()
         );
-        assert!(parse_background(&arguments(&["--effect", "blur"])).is_err());
+        let fallback_effect = parse_background(&arguments(&["--effect", "blur"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(fallback_effect.effect, ImageEffect::Blur { radius: 16 });
         assert!(
             parse_background(&arguments(&[
                 "--image",
@@ -280,5 +303,16 @@ mod tests {
             ]))
             .is_err()
         );
+    }
+
+    #[test]
+    fn solid_background_rejects_image_options() {
+        assert!(
+            parse_background(&arguments(&["--solid"]))
+                .unwrap()
+                .is_none()
+        );
+        assert!(parse_background(&arguments(&["--solid", "--effect", "blur"])).is_err());
+        assert!(parse_background(&arguments(&["--solid", "--image", "wall.png"])).is_err());
     }
 }
