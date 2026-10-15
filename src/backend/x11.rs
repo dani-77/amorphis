@@ -5,19 +5,24 @@
 //! as a lock-acquisition failure and never claims stronger isolation.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
+use crate::background::{LOCK_COLOR, StaticBackground, start_loader};
+use crate::image::{FitMode, ImageLimits, RgbaImage};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use std::error::Error;
 use std::fmt;
+use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::time::Duration;
 use x11rb::CURRENT_TIME;
 use x11rb::connection::Connection;
+use x11rb::image::{Image as X11Image, PixelLayout};
 use x11rb::protocol::Event;
 use x11rb::protocol::randr::{ConnectionExt as _, NotifyMask};
 use x11rb::protocol::xproto::{
     ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt as _, CreateGCAux,
-    CreateWindowAux, EventMask, GrabMode, GrabStatus, Rectangle, StackMode, Window, WindowClass,
+    CreateWindowAux, EventMask, Gcontext, GrabMode, GrabStatus, Rectangle, Screen, StackMode,
+    Window, WindowClass,
 };
 use x11rb::xcb_ffi::XCBConnection;
 use xkbcommon::xkb::{self, KeyDirection, Keycode, Keysym};
@@ -46,13 +51,25 @@ impl Error for X11Error {}
 struct LockWindow {
     root: Window,
     window: Window,
+    gc: Gcontext,
+    depth: u8,
+    pixel_layout: PixelLayout,
+    width: u16,
+    height: u16,
 }
 
 /// Lock an X11 display until PAM authentication succeeds.
-pub fn run(pam_service: &str, username: &str) -> Result<(), X11Error> {
+pub fn run(
+    pam_service: &str,
+    username: &str,
+    static_background: Option<StaticBackground>,
+) -> Result<(), X11Error> {
     let (connection, _preferred_screen) = XCBConnection::connect(None)
         .map_err(|error| X11Error::new(format!("could not connect to X11: {error}")))?;
     require_randr(&connection)?;
+    let limits = ImageLimits::default();
+    let (mut background_rx, background_fit) = start_loader(static_background, limits);
+    let mut background_image = None;
     let mut keyboard = XkbKeyboard::new(&connection)?;
     let mut machine = LockMachine::new();
     let mut auth = AuthWorker::spawn(PamProvider::new(pam_service, username)).map_err(|error| {
@@ -61,7 +78,7 @@ pub fn run(pam_service: &str, username: &str) -> Result<(), X11Error> {
     let mut secret = SecretBuffer::standard()
         .map_err(|error| X11Error::new(format!("could not allocate password buffer: {error}")))?;
     let mut active_attempt = None;
-    let windows = create_lock_windows(&connection)?;
+    let mut windows = create_lock_windows(&connection)?;
     let cursor = create_invisible_cursor(&connection, windows[0].root)?;
 
     machine
@@ -124,11 +141,35 @@ pub fn run(pam_service: &str, username: &str) -> Result<(), X11Error> {
                     }
                 },
                 Event::RandrScreenChangeNotify(event) => {
-                    if let Some(lock) = windows.iter().find(|lock| lock.root == event.root)
-                        && let Err(error) =
+                    if let Some(lock) = windows.iter_mut().find(|lock| lock.root == event.root) {
+                        if let Err(error) =
                             resize_lock_window(&connection, lock.window, event.width, event.height)
+                        {
+                            eprintln!("amorphis: {error}; X11 remains locked");
+                        } else {
+                            lock.width = event.width;
+                            lock.height = event.height;
+                            if let Some(image) = background_image.as_ref()
+                                && let Err(error) = render_background(
+                                    &connection,
+                                    lock,
+                                    image,
+                                    background_fit,
+                                    limits,
+                                )
+                            {
+                                eprintln!("amorphis: {error}; retaining solid X11 background");
+                            }
+                        }
+                    }
+                }
+                Event::Expose(event) => {
+                    if let Some(image) = background_image.as_ref()
+                        && let Some(lock) = windows.iter().find(|lock| lock.window == event.window)
+                        && let Err(error) =
+                            render_background(&connection, lock, image, background_fit, limits)
                     {
-                        eprintln!("amorphis: {error}; X11 remains locked");
+                        eprintln!("amorphis: {error}; retaining solid X11 background");
                     }
                 }
                 Event::MapNotify(event) if !is_lock_window(event.window, &windows) => {
@@ -142,6 +183,33 @@ pub fn run(pam_service: &str, username: &str) -> Result<(), X11Error> {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        if let Some(receiver) = background_rx.as_ref() {
+            match receiver.try_recv() {
+                Ok(Ok(image)) => {
+                    background_rx = None;
+                    background_image = Some(image);
+                    if let Some(image) = background_image.as_ref() {
+                        for lock in &windows {
+                            if let Err(error) =
+                                render_background(&connection, lock, image, background_fit, limits)
+                            {
+                                eprintln!("amorphis: {error}; retaining solid X11 background");
+                            }
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    background_rx = None;
+                    eprintln!("amorphis: {error}; retaining solid X11 background");
+                }
+                Err(TryRecvError::Disconnected) => {
+                    background_rx = None;
+                    eprintln!("amorphis: PNG loader stopped; retaining solid X11 background");
+                }
+                Err(TryRecvError::Empty) => {}
             }
         }
 
@@ -315,6 +383,7 @@ fn create_lock_windows(connection: &XCBConnection) -> Result<Vec<LockWindow>, X1
     }
     let mut windows = Vec::with_capacity(connection.setup().roots.len());
     for screen in &connection.setup().roots {
+        let pixel_layout = root_pixel_layout(screen)?;
         let color = connection
             .alloc_color(screen.default_colormap, 0x1212, 0x1212, 0x1414)
             .map_err(|error| X11Error::new(format!("could not allocate X11 lock colour: {error}")))?
@@ -346,6 +415,18 @@ fn create_lock_windows(connection: &XCBConnection) -> Result<Vec<LockWindow>, X1
             .map_err(|error| X11Error::new(format!("could not create X11 lock window: {error}")))?
             .check()
             .map_err(|error| X11Error::new(format!("could not create X11 lock window: {error}")))?;
+        let gc = connection.generate_id().map_err(|error| {
+            X11Error::new(format!("could not allocate X11 graphics id: {error}"))
+        })?;
+        connection
+            .create_gc(gc, window, &CreateGCAux::new().graphics_exposures(0))
+            .map_err(|error| {
+                X11Error::new(format!("could not create X11 graphics context: {error}"))
+            })?
+            .check()
+            .map_err(|error| {
+                X11Error::new(format!("could not create X11 graphics context: {error}"))
+            })?;
         connection
             .change_window_attributes(
                 screen.root,
@@ -364,9 +445,93 @@ fn create_lock_windows(connection: &XCBConnection) -> Result<Vec<LockWindow>, X1
         windows.push(LockWindow {
             root: screen.root,
             window,
+            gc,
+            depth: screen.root_depth,
+            pixel_layout,
+            width: screen.width_in_pixels,
+            height: screen.height_in_pixels,
         });
     }
     Ok(windows)
+}
+
+fn root_pixel_layout(screen: &Screen) -> Result<PixelLayout, X11Error> {
+    let visual = screen
+        .allowed_depths
+        .iter()
+        .find_map(|depth| {
+            depth
+                .visuals
+                .iter()
+                .find(|visual| visual.visual_id == screen.root_visual)
+                .map(|visual| (depth.depth, *visual))
+        })
+        .ok_or_else(|| X11Error::new("could not describe the X11 root visual"))?;
+    if visual.0 != screen.root_depth {
+        return Err(X11Error::new("X11 root visual has an inconsistent depth"));
+    }
+    PixelLayout::from_visual_type(visual.1)
+        .map_err(|error| X11Error::new(format!("unsupported X11 root visual: {error}")))
+}
+
+fn render_background(
+    connection: &XCBConnection,
+    lock: &LockWindow,
+    source: &RgbaImage,
+    fit: FitMode,
+    limits: ImageLimits,
+) -> Result<(), X11Error> {
+    let fitted = source
+        .fitted(
+            u32::from(lock.width),
+            u32::from(lock.height),
+            fit,
+            LOCK_COLOR,
+            limits,
+        )
+        .map_err(|error| X11Error::new(format!("could not fit X11 background: {error}")))?;
+    let mut image =
+        X11Image::allocate_native(lock.width, lock.height, lock.depth, connection.setup())
+            .map_err(|error| X11Error::new(format!("unsupported X11 image format: {error}")))?;
+
+    for (index, rgba) in fitted.pixels().as_chunks::<4>().0.iter().enumerate() {
+        let [red, green, blue] = composite_rgb(*rgba, LOCK_COLOR);
+        let pixel = lock.pixel_layout.encode((
+            u16::from(red) * 257,
+            u16::from(green) * 257,
+            u16::from(blue) * 257,
+        ));
+        let x = u16::try_from(index % usize::from(lock.width))
+            .map_err(|_| X11Error::new("X11 image x coordinate overflowed"))?;
+        let y = u16::try_from(index / usize::from(lock.width))
+            .map_err(|_| X11Error::new("X11 image y coordinate overflowed"))?;
+        image.put_pixel(x, y, pixel);
+    }
+
+    let requests = image
+        .put(connection, lock.window, lock.gc, 0, 0)
+        .map_err(|error| X11Error::new(format!("could not draw X11 background: {error}")))?;
+    for request in requests {
+        request
+            .check()
+            .map_err(|error| X11Error::new(format!("could not draw X11 background: {error}")))?;
+    }
+    connection
+        .flush()
+        .map_err(|error| X11Error::new(format!("could not flush X11 background: {error}")))?;
+    Ok(())
+}
+
+fn composite_rgb(source: [u8; 4], background: [u8; 4]) -> [u8; 3] {
+    let alpha = u32::from(source[3]);
+    let inverse = 255 - alpha;
+    let mut opaque = [0_u8; 3];
+    for channel in 0..3 {
+        opaque[channel] =
+            ((u32::from(source[channel]) * alpha + u32::from(background[channel]) * inverse + 127)
+                / 255) as u8;
+    }
+    opaque
 }
 
 fn create_invisible_cursor(connection: &XCBConnection, root: Window) -> Result<u32, X11Error> {
@@ -607,5 +772,17 @@ mod tests {
         .unwrap();
         assert_eq!(secret.as_bytes(), b"ab");
         assert_eq!(machine.state(), LockState::Locked);
+    }
+
+    #[test]
+    fn transparent_pixels_are_composited_over_the_opaque_lock_colour() {
+        assert_eq!(
+            composite_rgb([200, 100, 50, 0], [10, 20, 30, 255]),
+            [10, 20, 30]
+        );
+        assert_eq!(
+            composite_rgb([200, 100, 50, 255], [10, 20, 30, 255]),
+            [200, 100, 50]
+        );
     }
 }

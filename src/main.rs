@@ -1,4 +1,4 @@
-use amorphis::backend::wayland::BackgroundSource;
+use amorphis::background::{BackgroundSource, StaticBackground};
 use amorphis::image::{FitMode, ImageEffect, ImageLimits};
 use amorphis::{backend, system};
 use std::num::NonZeroU32;
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
         }
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland [--image PATH.png | --solid]\n                            [--fit cover|contain|center]\n                            [--effect none|blur|pixelate|blur-pixelate]\n                            [--blur-radius 1..=128]\n                            [--pixel-size N]\n  amorphis --backend x11\n  amorphis --help\n  amorphis --version\n\nWayland uses the embedded fallback image unless --image or --solid is selected.\nEffects apply to the selected PNG. Defaults: --effect none, --blur-radius 16,\n--pixel-size 16. Both backends require the PAM service {PAM_SERVICE_FILE}.\nTest development builds carefully before relying on them.",
+                "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland|x11 [--image PATH.png | --solid]\n                                [--fit cover|contain|center]\n                                [--effect none|blur|pixelate|blur-pixelate]\n                                [--blur-radius 1..=128]\n                                [--pixel-size N]\n  amorphis --help\n  amorphis --version\n\nBoth backends use the embedded fallback image unless --image or --solid is selected.\nEffects apply to the selected PNG. Defaults: --effect none, --blur-radius 16,\n--pixel-size 16. Both backends require the PAM service {PAM_SERVICE_FILE}.\nTest development builds carefully before relying on them.",
                 env!("CARGO_PKG_VERSION")
             );
             ExitCode::SUCCESS
@@ -31,7 +31,15 @@ fn main() -> ExitCode {
                 }
             }
         }
-        [option, backend] if option == "--backend" && backend == "x11" => run_x11(),
+        [option, backend, rest @ ..] if option == "--backend" && backend == "x11" => {
+            match parse_background(rest) {
+                Ok(background) => run_x11(background),
+                Err(error) => {
+                    eprintln!("amorphis: {error}; try --help (session unchanged)");
+                    ExitCode::from(2)
+                }
+            }
+        }
         _ => {
             eprintln!("amorphis: invalid arguments; try --help (session unchanged)");
             ExitCode::from(2)
@@ -39,11 +47,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_x11() -> ExitCode {
+fn run_x11(background: Option<StaticBackground>) -> ExitCode {
     let Some(username) = lock_identity() else {
         return ExitCode::from(2);
     };
-    match backend::x11::run(PAM_SERVICE, &username) {
+    match backend::x11::run(PAM_SERVICE, &username, background) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("amorphis: {error}");
@@ -52,7 +60,7 @@ fn run_x11() -> ExitCode {
     }
 }
 
-fn run_wayland(background: Option<backend::wayland::StaticBackground>) -> ExitCode {
+fn run_wayland(background: Option<StaticBackground>) -> ExitCode {
     let Some(username) = lock_identity() else {
         return ExitCode::from(2);
     };
@@ -88,9 +96,7 @@ fn lock_identity() -> Option<String> {
     }
 }
 
-fn parse_background(
-    arguments: &[String],
-) -> Result<Option<backend::wayland::StaticBackground>, &'static str> {
+fn parse_background(arguments: &[String]) -> Result<Option<StaticBackground>, &'static str> {
     let mut image: Option<PathBuf> = None;
     let mut solid = false;
     let mut fit = FitMode::Cover;
@@ -174,7 +180,7 @@ fn parse_background(
             "--effect" => return Err("--effect may only be specified once"),
             "--blur-radius" => return Err("--blur-radius may only be specified once"),
             "--pixel-size" => return Err("--pixel-size may only be specified once"),
-            _ => return Err("unknown Wayland option"),
+            _ => return Err("unknown background option"),
         }
     }
 
@@ -211,7 +217,7 @@ fn parse_background(
     }
 
     let source = image.map_or(BackgroundSource::EmbeddedFallback, BackgroundSource::File);
-    Ok(Some(backend::wayland::StaticBackground {
+    Ok(Some(StaticBackground {
         source,
         fit,
         effect,

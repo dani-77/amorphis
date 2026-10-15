@@ -1,7 +1,8 @@
 //! Wayland backend using `ext-session-lock-v1` exclusively.
 
 use crate::auth::{AuthOutcome, AuthWorker, PamProvider, SubmitError};
-use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage, load_png, load_png_bytes};
+use crate::background::{LOCK_COLOR, StaticBackground, start_loader};
+use crate::image::{FitMode, ImageLimits, RgbaImage};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use smithay_client_toolkit::{
@@ -22,9 +23,7 @@ use smithay_client_toolkit::{
 };
 use std::error::Error;
 use std::fmt;
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::thread;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 use wayland_client::{
     Connection, QueueHandle,
@@ -33,22 +32,6 @@ use wayland_client::{
 };
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const LOCK_COLOR: [u8; 4] = [18, 18, 20, 255];
-const FALLBACK_PNG: &[u8] = include_bytes!("../../assets/amorphis-fallback.png");
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum BackgroundSource {
-    File(PathBuf),
-    EmbeddedFallback,
-}
-
-#[derive(Clone, Debug)]
-pub struct StaticBackground {
-    pub source: BackgroundSource,
-    pub fit: FitMode,
-    pub effect: ImageEffect,
-}
-
 #[derive(Debug)]
 pub enum WaylandError {
     Connect(String),
@@ -113,8 +96,7 @@ pub fn run(
         .map_err(|error| WaylandError::AuthenticationWorker(error.to_string()))?;
     let secret = SecretBuffer::standard()
         .map_err(|error| WaylandError::AuthenticationWorker(error.to_string()))?;
-    let (background_rx, background_fit) =
-        start_background_loader(static_background, ImageLimits::default());
+    let (background_rx, background_fit) = start_loader(static_background, ImageLimits::default());
     let mut event_loop: EventLoop<WaylandApp> =
         EventLoop::try_new().map_err(|error| WaylandError::EventLoop(error.to_string()))?;
 
@@ -729,53 +711,6 @@ fn rgba_over_opaque_argb(source: [u8; 4], background: [u8; 4]) -> [u8; 4] {
     argb8888_bytes(opaque)
 }
 
-fn start_background_loader(
-    background: Option<StaticBackground>,
-    limits: ImageLimits,
-) -> (Option<Receiver<Result<RgbaImage, String>>>, FitMode) {
-    let Some(background) = background else {
-        return (None, FitMode::Cover);
-    };
-    let fit = background.fit;
-    let (sender, receiver) = mpsc::sync_channel(1);
-    let spawn = thread::Builder::new()
-        .name("amorphis-image".into())
-        .spawn(move || {
-            let result = load_background(&background.source, limits).and_then(|mut image| {
-                background
-                    .effect
-                    .apply(&mut image, limits)
-                    .map_err(|error| format!("could not apply image effect: {error}"))?;
-                Ok(image)
-            });
-            let _ = sender.send(result);
-        });
-    if let Err(error) = spawn {
-        eprintln!("amorphis: could not start PNG loader: {error}; using solid background");
-        return (None, fit);
-    }
-    (Some(receiver), fit)
-}
-
-fn load_background(source: &BackgroundSource, limits: ImageLimits) -> Result<RgbaImage, String> {
-    match source {
-        BackgroundSource::EmbeddedFallback => {
-            load_png_bytes(FALLBACK_PNG, limits).map_err(|error| error.to_string())
-        }
-        BackgroundSource::File(path) => match load_png(path, limits) {
-            Ok(image) => Ok(image),
-            Err(primary_error) => {
-                eprintln!("amorphis: {primary_error}; using the embedded fallback background");
-                load_png_bytes(FALLBACK_PNG, limits).map_err(|fallback_error| {
-                    format!(
-                        "custom PNG failed ({primary_error}) and embedded fallback failed ({fallback_error})"
-                    )
-                })
-            }
-        },
-    }
-}
-
 smithay_client_toolkit::delegate_compositor!(WaylandApp);
 smithay_client_toolkit::delegate_output!(WaylandApp);
 smithay_client_toolkit::delegate_seat!(WaylandApp);
@@ -788,6 +723,7 @@ wayland_client::delegate_noop!(WaylandApp: ignore wl_buffer::WlBuffer);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::background::{BackgroundSource, load_background};
 
     #[test]
     fn argb_encoding_matches_native_wayland_layout() {

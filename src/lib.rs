@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod backend;
+pub mod background;
 pub mod image;
 pub mod secret;
 pub mod state;

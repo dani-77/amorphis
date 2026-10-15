@@ -356,13 +356,14 @@ Concluído no primeiro incremento da Fase B:
 - worker PAM não bloqueante e política PAM de exemplo;
 - backend Wayland por `ext-session-lock-v1`, incluindo outputs dinâmicos,
   teclado e buffers `wl_shm` opacos;
-- PNG estático carregado num worker, com limites e modos `cover`, `contain` e
-  `center`, sempre com fallback sólido;
-- backend X11 sólido com grabs verificados, XKB, múltiplos X screens e RandR;
+- PNG estático carregado num worker para Wayland e X11, com limites e modos
+  `cover`, `contain` e `center`, sempre com fallback sólido;
+- efeitos de blur e pixelização ligados à CLI comum dos dois backends;
+- backend X11 com fundos sólidos/PNG, grabs verificados, XKB, múltiplos X
+  screens e RandR;
 - desativação de core dumps antes de aceitar input sensível;
 - testes unitários, `clippy -D warnings` e build otimizada.
 
-Ainda por validar/implementar: testes reais em compositores/servidores
-aninhados, matriz PAM por distribuição, imagem estática no X11, captura do
-desktop, ligação dos efeitos à CLI, feedback visual e endurecimento final de
-empacotamento.
+Ainda por validar/implementar: a matriz alargada de compositores/servidores,
+multi-monitor, suspend/resume e PAM por distribuição; captura do desktop,
+feedback visual e endurecimento final de empacotamento.

@@ -12,7 +12,7 @@ and optional blurred or pixelated backgrounds without turning the lock screen
 into a desktop shell.
 
 It is still pre-release software. The Wayland backend has been smoke-tested on
-Wasp and the solid X11 backend on Xorg, but the full compositor, multi-monitor,
+Wasp and the X11 backend on Xorg, but the full compositor, multi-monitor,
 suspend/resume, and hostile-input test matrix is not complete. Do not yet rely
 on Amorphis as the sole protection for an important session.
 
@@ -74,13 +74,15 @@ Before running it, install a distribution-appropriate PAM policy named
 
 ## Using it
 
-Wayland uses the embedded branded background by default:
+Both backends use the embedded branded background by default:
 
 ```sh
 amorphis --backend wayland
+amorphis --backend x11
 ```
 
-Use a custom PNG and choose how it fits the output:
+Use a custom PNG and choose how it fits the output (the examples use Wayland;
+replace it with `x11` to use the X11 backend):
 
 ```sh
 amorphis --backend wayland --image /path/to/background.png --fit cover
@@ -98,12 +100,7 @@ the final solid-colour fallback explicitly with:
 
 ```sh
 amorphis --backend wayland --solid
-```
-
-The initial X11 backend currently uses a solid background:
-
-```sh
-amorphis --backend x11
+amorphis --backend x11 --solid
 ```
 
 Type the account password and press `Enter` to unlock. Input is deliberately
@@ -114,9 +111,10 @@ current entry, and a failed authentication attempt leaves the session locked.
 
 The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
 embedded fallback, a 7680×4320 custom PNG, and combined blur/pixelation. The
-solid X11 path has been tested in a real Xorg session with keyboard and pointer
-capture plus PAM unlock. The wider security matrix still requires live testing,
-and desktop capture is not implemented yet.
+X11 path has been tested in a real Xorg session with keyboard and pointer
+capture, PAM unlock, the embedded fallback, blur, and pixelation. The wider
+security matrix still requires live testing, and desktop capture is not
+implemented yet.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on
