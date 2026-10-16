@@ -130,10 +130,10 @@ The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
 embedded fallback, a 7680×4320 custom PNG, native desktop capture, and combined
 blur/pixelation. The X11 path has been tested in a real Xorg session with
 keyboard and pointer capture, PAM unlock, the embedded fallback, blur, and
-pixelation. The wider security matrix still requires live testing. X11 desktop
-capture has been smoke-tested under Xephyr, but still awaits a real-session
-Xorg test. Wayland capture still needs multi-monitor and broader compositor
-testing.
+pixelation, including desktop capture with the combined effect. The wider
+security matrix still requires live testing. X11 desktop capture has also been
+smoke-tested under Xephyr. Wayland capture still needs multi-monitor and
+broader compositor testing.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on

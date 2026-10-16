@@ -370,5 +370,6 @@ Concluído no primeiro incremento da Fase B:
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,
 multi-monitor, suspend/resume e PAM por distribuição; validação real da captura
-X11 fora de Xephyr, captura Wayland fora de Wasp/wlroots, feedback visual e
-endurecimento final de empacotamento.
+Wayland fora de Wasp/wlroots, feedback visual e endurecimento final de
+empacotamento. A captura X11 com blur/pixelização já foi validada numa sessão
+Xorg real, além do teste isolado sob Xephyr.
