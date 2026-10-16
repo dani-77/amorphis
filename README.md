@@ -124,6 +124,10 @@ Type the account password and press `Enter` to unlock. Input is deliberately
 hidden; `Backspace` removes one character, `Ctrl+U` or `Escape` clears the
 current entry, and a failed authentication attempt leaves the session locked.
 
+Amorphis always covers every output/root advertised by the display server. It
+does not offer selective per-monitor locking; newly connected outputs receive
+an opaque solid frame even when no pre-lock capture exists for them.
+
 ## Current status
 
 The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
@@ -145,6 +149,13 @@ the compositor advertising `ext-session-lock-v1`.
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
+```
+
+With Xephyr and ImageMagick installed, the disposable two-screen X11 smoke test
+also checks per-root capture and RandR resizing without locking the host display:
+
+```sh
+contrib/tests/x11-multiscreen-smoke.sh
 ```
 
 The design, security boundaries, implementation plan, and remaining acceptance

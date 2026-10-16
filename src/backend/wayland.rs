@@ -335,9 +335,11 @@ impl WaylandApp {
         height: u32,
         output_id: Option<u32>,
     ) -> Result<(), &'static str> {
-        let source = output_id
-            .and_then(|id| self.captured_images.get(&id))
-            .or(self.background_image.as_ref());
+        let source = background_for_output(
+            &self.captured_images,
+            self.background_image.as_ref(),
+            output_id,
+        );
         if let Some(source) = source
             && let Ok(fitted) =
                 source.fitted(width, height, self.background_fit, LOCK_COLOR, self.limits)
@@ -608,6 +610,14 @@ impl WaylandApp {
         }
         Ok(())
     }
+}
+
+fn background_for_output<'a>(
+    captured: &'a HashMap<u32, RgbaImage>,
+    shared: Option<&'a RgbaImage>,
+    output_id: Option<u32>,
+) -> Option<&'a RgbaImage> {
+    output_id.and_then(|id| captured.get(&id)).or(shared)
 }
 
 impl SessionLockHandler for WaylandApp {
@@ -954,5 +964,45 @@ mod tests {
         let image = load_background(&BackgroundSource::EmbeddedFallback, ImageLimits::default())
             .expect("embedded fallback must remain a valid bounded PNG");
         assert_eq!((image.width(), image.height()), (1672, 941));
+    }
+
+    #[test]
+    fn captured_backgrounds_remain_bound_to_their_wayland_output() {
+        let limits = ImageLimits::default();
+        let first = RgbaImage::solid(1, 1, [180, 20, 20, 255], limits).unwrap();
+        let second = RgbaImage::solid(1, 1, [20, 20, 180, 255], limits).unwrap();
+        let captured = HashMap::from([(7, first), (11, second)]);
+
+        assert_eq!(
+            background_for_output(&captured, None, Some(7))
+                .unwrap()
+                .pixels(),
+            &[180, 20, 20, 255]
+        );
+        assert_eq!(
+            background_for_output(&captured, None, Some(11))
+                .unwrap()
+                .pixels(),
+            &[20, 20, 180, 255]
+        );
+        assert!(background_for_output(&captured, None, Some(99)).is_none());
+        assert!(background_for_output(&captured, None, None).is_none());
+    }
+
+    #[test]
+    fn uncaptured_wayland_output_uses_only_the_shared_fallback() {
+        let fallback = RgbaImage::solid(
+            1,
+            1,
+            [LOCK_COLOR[0], LOCK_COLOR[1], LOCK_COLOR[2], 255],
+            ImageLimits::default(),
+        )
+        .unwrap();
+        let captured = HashMap::new();
+
+        assert!(std::ptr::eq(
+            background_for_output(&captured, Some(&fallback), Some(99)).unwrap(),
+            &fallback
+        ));
     }
 }

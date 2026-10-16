@@ -952,4 +952,22 @@ mod tests {
         assert_eq!(component_to_u8(0x8080), 128);
         assert_eq!(component_to_u8(u16::MAX), 255);
     }
+
+    #[test]
+    fn captured_backgrounds_remain_bound_to_their_x11_root() {
+        let limits = ImageLimits::default();
+        let first = RgbaImage::solid(1, 1, [180, 20, 20, 255], limits).unwrap();
+        let second = RgbaImage::solid(1, 1, [20, 20, 180, 255], limits).unwrap();
+        let backgrounds = LoadedBackground::PerRoot(vec![(7, first), (11, second)]);
+
+        assert_eq!(
+            backgrounds.image_for(7).unwrap().pixels(),
+            &[180, 20, 20, 255]
+        );
+        assert_eq!(
+            backgrounds.image_for(11).unwrap().pixels(),
+            &[20, 20, 180, 255]
+        );
+        assert!(backgrounds.image_for(99).is_none());
+    }
 }

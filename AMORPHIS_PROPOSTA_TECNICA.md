@@ -372,4 +372,5 @@ Ainda por validar/implementar: a matriz alargada de compositores/servidores,
 multi-monitor, suspend/resume e PAM por distribuição; validação real da captura
 Wayland fora de Wasp/wlroots, feedback visual e endurecimento final de
 empacotamento. A captura X11 com blur/pixelização já foi validada numa sessão
-Xorg real, além do teste isolado sob Xephyr.
+Xorg real. Duas capturas independentes e o redimensionamento RandR foram também
+validados num Xephyr descartável com dois X screens de resoluções diferentes.
