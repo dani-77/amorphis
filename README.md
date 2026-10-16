@@ -25,6 +25,9 @@ session.
   both keyboard and pointer grabs, with RandR resize handling.
 - **PAM authentication** — shares one fail-closed authentication path across
   both backends and never places passwords in logs, arguments, or files.
+- **Length-independent feedback** — a central ring pulses teal for input,
+  cycles three fixed dots while PAM is working, and turns red briefly after a
+  failed attempt without displaying the password length.
 - **Safe background fallback** — custom PNG → embedded branded image → opaque
   solid colour. A broken or oversized image never prevents the session locking.
 - **Blur and pixelation** — `blur`, `pixelate`, or both, processed in a bounded
@@ -144,6 +147,10 @@ A real Wayland suspend/resume cycle was also completed while capture with
 combined blur/pixelation was active: the lock remained covered after resume,
 rejected two failed authentication attempts, and unlocked normally only after
 successful PAM authentication.
+The authentication indicator has automated renderer/state coverage and has
+been smoke-tested with injected input and a rejected PAM attempt under Xephyr;
+input, animated verification, timed failure feedback, and successful unlock
+have also been confirmed visually in a real Wayland session.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on

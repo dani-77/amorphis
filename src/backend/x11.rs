@@ -9,6 +9,7 @@ use crate::background::{
     BackgroundReceiver, BackgroundSource, LOCK_COLOR, StaticBackground, start_loader,
 };
 use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage};
+use crate::indicator::{AuthIndicator, IndicatorStyle, draw_indicator};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use std::error::Error;
@@ -134,6 +135,7 @@ pub fn run(
     let mut secret = SecretBuffer::standard()
         .map_err(|error| X11Error::new(format!("could not allocate password buffer: {error}")))?;
     let mut active_attempt = None;
+    let mut indicator = AuthIndicator::default();
     let mut windows = create_lock_windows(&connection)?;
     let cursor = create_invisible_cursor(&connection, windows[0].root)?;
 
@@ -200,6 +202,7 @@ pub fn run(
                             &mut active_attempt,
                             &mut machine,
                             authentication_available,
+                            &mut indicator,
                         ) {
                             eprintln!("amorphis: {error}; X11 remains locked");
                         }
@@ -226,28 +229,40 @@ pub fn run(
                         } else {
                             lock.width = event.width;
                             lock.height = event.height;
-                            if let Some(image) = loaded_background.as_ref().and_then(
+                            let image = loaded_background.as_ref().and_then(
                                 |background: &LoadedBackground| background.image_for(lock.root),
-                            ) && let Err(error) =
-                                render_background(&connection, lock, image, background_fit, limits)
-                            {
+                            );
+                            if let Err(error) = render_background(
+                                &connection,
+                                lock,
+                                image,
+                                background_fit,
+                                limits,
+                                indicator.style(),
+                            ) {
                                 eprintln!("amorphis: {error}; retaining solid X11 background");
                             }
                         }
                     }
                 }
                 Event::Expose(event) => {
-                    if let Some(lock) = windows.iter().find(|lock| lock.window == event.window)
-                        && let Some(image) =
+                    if let Some(lock) = windows.iter().find(|lock| lock.window == event.window) {
+                        let image =
                             loaded_background
                                 .as_ref()
                                 .and_then(|background: &LoadedBackground| {
                                     background.image_for(lock.root)
-                                })
-                        && let Err(error) =
-                            render_background(&connection, lock, image, background_fit, limits)
-                    {
-                        eprintln!("amorphis: {error}; retaining solid X11 background");
+                                });
+                        if let Err(error) = render_background(
+                            &connection,
+                            lock,
+                            image,
+                            background_fit,
+                            limits,
+                            indicator.style(),
+                        ) {
+                            eprintln!("amorphis: {error}; retaining solid X11 background");
+                        }
                     }
                 }
                 Event::MapNotify(event) if !is_lock_window(event.window, &windows) => {
@@ -272,8 +287,14 @@ pub fn run(
                 if let Some(background) = loaded_background.as_ref() {
                     for lock in &windows {
                         if let Some(image) = background.image_for(lock.root)
-                            && let Err(error) =
-                                render_background(&connection, lock, image, background_fit, limits)
+                            && let Err(error) = render_background(
+                                &connection,
+                                lock,
+                                Some(image),
+                                background_fit,
+                                limits,
+                                indicator.style(),
+                            )
                         {
                             eprintln!("amorphis: {error}; retaining solid X11 background");
                         }
@@ -300,6 +321,7 @@ pub fn run(
                     if machine.state() == LockState::Authenticating {
                         let _ = machine.apply(LockEvent::AuthenticationFailed);
                     }
+                    indicator.failed();
                     continue;
                 }
                 match response.outcome {
@@ -322,6 +344,7 @@ pub fn run(
                         if machine.apply(LockEvent::AuthenticationFailed).is_err() {
                             eprintln!("amorphis: invalid authentication state; X11 remains locked");
                         }
+                        indicator.failed();
                     }
                 }
             }
@@ -334,11 +357,25 @@ pub fn run(
                         .map_err(|error| X11Error::new(error.to_string()))?;
                     active_attempt = None;
                 }
+                indicator.failed();
                 eprintln!(
                     "amorphis: authentication worker stopped; X11 remains locked (external recovery required)"
                 );
             }
             Err(_) => {}
+        }
+
+        if let Some(style) = indicator.take_redraw() {
+            for lock in &windows {
+                let image = loaded_background
+                    .as_ref()
+                    .and_then(|background| background.image_for(lock.root));
+                if let Err(error) =
+                    render_background(&connection, lock, image, background_fit, limits, style)
+                {
+                    eprintln!("amorphis: {error}; retaining previous X11 frame");
+                }
+            }
         }
 
         thread::sleep(EVENT_POLL_INTERVAL);
@@ -410,11 +447,16 @@ fn handle_key(
     active_attempt: &mut Option<u64>,
     machine: &mut LockMachine,
     authentication_available: bool,
+    indicator: &mut AuthIndicator,
 ) -> Result<(), X11Error> {
     match symbol {
-        Keysym::Escape => secret.clear(),
+        Keysym::Escape => {
+            secret.clear();
+            indicator.input();
+        }
         Keysym::BackSpace => {
             secret.pop_char();
+            indicator.input();
         }
         Keysym::Return | Keysym::KP_Enter if authentication_available => {
             let replacement = SecretBuffer::standard().map_err(|error| {
@@ -427,6 +469,7 @@ fn handle_key(
                         .apply(LockEvent::BeginAuthentication)
                         .map_err(|error| X11Error::new(error.to_string()))?;
                     *active_attempt = Some(attempt);
+                    indicator.verifying();
                 }
                 Err(SubmitError::Busy(value)) => *secret = value,
                 Err(SubmitError::Stopped(value)) => {
@@ -437,9 +480,16 @@ fn handle_key(
                 }
             }
         }
-        Keysym::u if control => secret.clear(),
-        _ if !control && text.chars().all(|character| !character.is_control()) => {
-            let _ = secret.push_str(text);
+        Keysym::u if control => {
+            secret.clear();
+            indicator.input();
+        }
+        _ if !control
+            && !text.is_empty()
+            && text.chars().all(|character| !character.is_control())
+            && secret.push_str(text).is_ok() =>
+        {
+            indicator.input();
         }
         _ => {}
     }
@@ -637,19 +687,28 @@ fn start_capture_processor(
 fn render_background(
     connection: &XCBConnection,
     lock: &LockWindow,
-    source: &RgbaImage,
+    source: Option<&RgbaImage>,
     fit: FitMode,
     limits: ImageLimits,
+    indicator: IndicatorStyle,
 ) -> Result<(), X11Error> {
-    let fitted = source
-        .fitted(
+    let mut fitted = match source {
+        Some(source) => source.fitted(
             u32::from(lock.width),
             u32::from(lock.height),
             fit,
             LOCK_COLOR,
             limits,
-        )
-        .map_err(|error| X11Error::new(format!("could not fit X11 background: {error}")))?;
+        ),
+        None => RgbaImage::solid(
+            u32::from(lock.width),
+            u32::from(lock.height),
+            LOCK_COLOR,
+            limits,
+        ),
+    }
+    .map_err(|error| X11Error::new(format!("could not fit X11 background: {error}")))?;
+    draw_indicator(&mut fitted, indicator);
     let mut image =
         X11Image::allocate_native(lock.width, lock.height, lock.depth, connection.setup())
             .map_err(|error| X11Error::new(format!("unsupported X11 image format: {error}")))?;
@@ -918,6 +977,7 @@ mod tests {
         let mut machine = LockMachine::new();
         machine.apply(LockEvent::RequestLock).unwrap();
         machine.apply(LockEvent::LockConfirmed).unwrap();
+        let mut indicator = AuthIndicator::default();
 
         handle_key(
             Keysym::BackSpace,
@@ -928,10 +988,12 @@ mod tests {
             &mut attempt,
             &mut machine,
             true,
+            &mut indicator,
         )
         .unwrap();
         assert_eq!(secret.as_bytes(), b"ab");
         assert_eq!(machine.state(), LockState::Locked);
+        assert_eq!(indicator.style(), IndicatorStyle::Input);
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub mod auth;
 pub mod backend;
 pub mod background;
 pub mod image;
+mod indicator;
 pub mod secret;
 pub mod state;
 pub mod system;

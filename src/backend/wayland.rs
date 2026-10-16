@@ -6,6 +6,7 @@ use crate::background::{
     BackgroundSource, LOCK_COLOR, StaticBackground, load_background, start_loader,
 };
 use crate::image::{FitMode, ImageEffect, ImageLimits, RgbaImage};
+use crate::indicator::{AuthIndicator, IndicatorStyle, draw_indicator};
 use crate::secret::SecretBuffer;
 use crate::state::{LockEvent, LockMachine, LockState};
 use smithay_client_toolkit::{
@@ -132,6 +133,7 @@ pub fn run(
         background_fit: fit,
         background_image: None,
         captured_images: HashMap::new(),
+        indicator: AuthIndicator::default(),
     };
 
     app.machine
@@ -185,6 +187,7 @@ pub fn run(
         if let Some(exit) = app.exit.take() {
             return exit;
         }
+        app.poll_indicator(&qh);
     }
 }
 
@@ -299,6 +302,7 @@ struct WaylandApp {
     background_fit: FitMode,
     background_image: Option<RgbaImage>,
     captured_images: HashMap<u32, RgbaImage>,
+    indicator: AuthIndicator,
 }
 
 enum CaptureBackground {
@@ -335,19 +339,33 @@ impl WaylandApp {
         height: u32,
         output_id: Option<u32>,
     ) -> Result<(), &'static str> {
+        let style = self.indicator.style();
+        self.render_current_with_indicator(qh, surface, width, height, output_id, style)
+    }
+
+    fn render_current_with_indicator(
+        &mut self,
+        qh: &QueueHandle<Self>,
+        surface: &SessionLockSurface,
+        width: u32,
+        height: u32,
+        output_id: Option<u32>,
+        style: IndicatorStyle,
+    ) -> Result<(), &'static str> {
         let source = background_for_output(
             &self.captured_images,
             self.background_image.as_ref(),
             output_id,
         );
-        if let Some(source) = source
-            && let Ok(fitted) =
-                source.fitted(width, height, self.background_fit, LOCK_COLOR, self.limits)
-            && self.render_rgba(qh, surface, &fitted).is_ok()
-        {
-            return Ok(());
+        let mut frame = match source {
+            Some(source) => source
+                .fitted(width, height, self.background_fit, LOCK_COLOR, self.limits)
+                .or_else(|_| RgbaImage::solid(width, height, LOCK_COLOR, self.limits)),
+            None => RgbaImage::solid(width, height, LOCK_COLOR, self.limits),
         }
-        self.render_solid(qh, surface, width, height)
+        .map_err(|_| "could not allocate lock frame")?;
+        draw_indicator(&mut frame, style);
+        self.render_rgba(qh, surface, &frame)
     }
 
     fn render_solid(
@@ -524,23 +542,55 @@ impl WaylandApp {
         }
     }
 
+    fn poll_indicator(&mut self, qh: &QueueHandle<Self>) {
+        let Some(style) = self.indicator.take_redraw() else {
+            return;
+        };
+        let surfaces: Vec<_> = self
+            .surfaces
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .configured_size
+                    .map(|size| (entry._surface.clone(), size, entry.output_id))
+            })
+            .collect();
+        for (surface, (width, height), output_id) in surfaces {
+            if self
+                .render_current_with_indicator(qh, &surface, width, height, output_id, style)
+                .is_err()
+            {
+                eprintln!("amorphis: could not redraw authentication indicator");
+            }
+        }
+    }
+
     fn handle_key(&mut self, event: KeyEvent) {
         if self.machine.state() != LockState::Locked {
             return;
         }
 
         match event.keysym {
-            Keysym::Escape => self.secret.clear(),
+            Keysym::Escape => {
+                self.secret.clear();
+                self.indicator.input();
+            }
             Keysym::BackSpace => {
                 self.secret.pop_char();
+                self.indicator.input();
             }
             Keysym::Return | Keysym::KP_Enter => self.submit_authentication(),
-            Keysym::u if self.modifiers.ctrl => self.secret.clear(),
+            Keysym::u if self.modifiers.ctrl => {
+                self.secret.clear();
+                self.indicator.input();
+            }
             _ if !self.modifiers.ctrl && !self.modifiers.alt && !self.modifiers.logo => {
                 if let Some(text) = event.utf8
                     && text.chars().all(|character| !character.is_control())
+                    && !text.is_empty()
+                    && self.secret.push_str(&text).is_ok()
                 {
-                    let _ = self.secret.push_str(&text);
+                    self.indicator.input();
                 }
             }
             _ => {}
@@ -560,6 +610,7 @@ impl WaylandApp {
                     return;
                 }
                 self.active_attempt = Some(attempt);
+                self.indicator.verifying();
             }
             Err(SubmitError::Busy(secret)) => {
                 self.secret = secret;
@@ -606,6 +657,7 @@ impl WaylandApp {
                 self.machine
                     .apply(LockEvent::AuthenticationFailed)
                     .map_err(|_| WaylandError::ProtocolState)?;
+                self.indicator.failed();
             }
         }
         Ok(())
