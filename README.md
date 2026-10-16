@@ -136,8 +136,9 @@ blur/pixelation. The X11 path has been tested in a real Xorg session with
 keyboard and pointer capture, PAM unlock, the embedded fallback, blur, and
 pixelation, including desktop capture with the combined effect. The wider
 security matrix still requires live testing. X11 desktop capture has also been
-smoke-tested under Xephyr. Wayland capture still needs multi-monitor and
-broader compositor testing.
+smoke-tested under Xephyr. Wayland per-output capture has been smoke-tested on
+a nested Wasp instance with two virtual outputs and distinct content on each;
+physical multi-monitor and broader compositor testing remain pending.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on
