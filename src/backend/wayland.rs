@@ -108,6 +108,9 @@ pub fn run(
         .map_err(|error| WaylandError::AuthenticationWorker(error.to_string()))?;
     let secret = SecretBuffer::standard()
         .map_err(|error| WaylandError::AuthenticationWorker(error.to_string()))?;
+    if !secret.is_memory_locked() {
+        eprintln!("amorphis: warning: password buffer could not be locked against swap");
+    }
     let mut event_loop: EventLoop<WaylandApp> =
         EventLoop::try_new().map_err(|error| WaylandError::EventLoop(error.to_string()))?;
 
@@ -602,6 +605,11 @@ impl WaylandApp {
             Ok(secret) => secret,
             Err(_) => return,
         };
+        if !replacement.is_memory_locked() {
+            eprintln!(
+                "amorphis: warning: replacement password buffer could not be locked against swap"
+            );
+        }
         let submitted = std::mem::replace(&mut self.secret, replacement);
         match self.auth.submit(submitted) {
             Ok(attempt) => {

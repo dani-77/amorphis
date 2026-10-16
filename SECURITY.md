@@ -8,10 +8,17 @@ Amorphis as the sole protection for an important session.
 
 Before locking, Amorphis disables core dumps and, on Linux, marks the process
 non-dumpable. The controlled password buffer has a fixed capacity and is erased
-explicitly when cleared or dropped. Passing a password through the PAM ABI
-necessarily creates copies owned by PAM and its modules; Amorphis cannot
-guarantee erasure of those copies. Swap and PAM-owned copies remain known
-limitations.
+explicitly when cleared or dropped. On Linux, each controlled allocation also
+uses best-effort `mlock`; failure emits a warning but does not leave the session
+unlocked. Passing a password through the PAM ABI necessarily creates copies
+owned by the PAM client crate, PAM, and its modules; Amorphis cannot lock or
+guarantee erasure of those copies. Those external copies, and the controlled
+buffer on systems where `mlock` fails, remain swap-related limitations.
+
+The lockfile was scanned against 1,329 RustSec advisories on 2026-10-16; no
+known vulnerability was reported among its 75 crates. This is a point-in-time
+result, not a substitute for repeating `cargo audit` as advisories and the
+lockfile change.
 
 The Wayland backend only uses `ext-session-lock-v1`. It never substitutes a
 normal fullscreen, layer-shell, or XWayland window for a real session lock.

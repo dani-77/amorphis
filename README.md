@@ -25,6 +25,9 @@ session.
   both keyboard and pointer grabs, with RandR resize handling.
 - **PAM authentication** — shares one fail-closed authentication path across
   both backends and never places passwords in logs, arguments, or files.
+- **Password memory hygiene** — uses a fixed-capacity buffer, explicit erasure,
+  disabled process dumps, and best-effort `mlock` with a visible warning when
+  the operating-system limit prevents swap protection.
 - **Length-independent feedback** — a central ring pulses teal for input,
   cycles three fixed dots while PAM is working, and turns red briefly after a
   failed attempt without displaying the password length.
@@ -162,6 +165,7 @@ the compositor advertising `ext-session-lock-v1`.
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
+cargo audit
 ```
 
 With Xephyr and ImageMagick installed, the disposable two-screen X11 smoke test

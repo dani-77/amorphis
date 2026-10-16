@@ -312,15 +312,18 @@ Regras:
 
 1. **Licença do Amorphis:** MIT, confirmada pelo autor e aplicada ao repositório.
 2. **Crate PAM:** `pam-client2` foi revista no caminho usado e fixada no
-   lockfile; a auditoria final continua necessária. A crate e o próprio PAM
-   criam cópias do segredo que o Amorphis não consegue apagar.
+   lockfile. Em 2026-10-16, `cargo audit` analisou as 75 crates contra 1 329
+   avisos RustSec sem encontrar vulnerabilidades conhecidas; a auditoria deve
+   ser repetida regularmente. A crate e o próprio PAM criam cópias do segredo
+   que o Amorphis não consegue bloquear ou apagar.
 3. **Formatos de imagem:** PNG foi confirmado e é o único formato ativado;
    JPEG só será considerado com justificação adicional.
 4. **Captura Wayland:** suporte real varia por compositor. O produto deve anunciar capacidades detetadas, não uma lista rígida de desktops.
 5. **Comportamento de sinais no X11:** não há equivalente ao fail-closed do compositor. É limitação arquitetural, não algo que a UI possa corrigir.
-6. **Core dumps/swap:** core dumps e dumpabilidade Linux já são desativados
-   antes do lock. `MADV_DONTDUMP`, `mlock`/swap e as cópias internas de PAM
-   continuam limitações a estudar.
+6. **Core dumps/swap:** core dumps e dumpabilidade Linux são desativados antes
+   do lock. O buffer controlado usa `mlock` de melhor esforço e avisa se o
+   limite do sistema impedir a proteção; as cópias internas de PAM continuam
+   fora deste controlo.
 
 ## 12. Fontes técnicas consultadas
 
@@ -367,7 +370,10 @@ Concluído no primeiro incremento da Fase B:
   fallback incorporado e efeitos processados depois do pedido de session lock;
 - indicador de autenticação comum aos dois backends, sem revelar comprimento:
   input verde-azulado, três pontos fixos animados durante PAM e erro vermelho;
-- desativação de core dumps antes de aceitar input sensível;
+- desativação de core dumps antes de aceitar input sensível, limpeza explícita
+  e `mlock` de melhor esforço no buffer controlado da palavra-passe;
+- auditoria RustSec inicial das 75 crates do lockfile sem vulnerabilidades
+  conhecidas;
 - testes unitários, `clippy -D warnings` e build otimizada.
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,

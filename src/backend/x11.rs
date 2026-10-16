@@ -134,6 +134,9 @@ pub fn run(
     })?;
     let mut secret = SecretBuffer::standard()
         .map_err(|error| X11Error::new(format!("could not allocate password buffer: {error}")))?;
+    if !secret.is_memory_locked() {
+        eprintln!("amorphis: warning: password buffer could not be locked against swap");
+    }
     let mut active_attempt = None;
     let mut indicator = AuthIndicator::default();
     let mut windows = create_lock_windows(&connection)?;
@@ -462,6 +465,11 @@ fn handle_key(
             let replacement = SecretBuffer::standard().map_err(|error| {
                 X11Error::new(format!("could not allocate password buffer: {error}"))
             })?;
+            if !replacement.is_memory_locked() {
+                eprintln!(
+                    "amorphis: warning: replacement password buffer could not be locked against swap"
+                );
+            }
             let submitted = std::mem::replace(secret, replacement);
             match auth.submit(submitted) {
                 Ok(attempt) => {

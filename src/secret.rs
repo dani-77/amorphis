@@ -1,4 +1,4 @@
-//! Fixed-capacity secret input with explicit erasure.
+//! Fixed-capacity secret input with explicit erasure and best-effort locking.
 
 use std::error::Error;
 use std::ffi::CString;
@@ -31,11 +31,14 @@ impl Error for SecretError {}
 /// A UTF-8 secret that never reallocates after construction.
 ///
 /// The backing allocation is erased with `explicit_bzero(3)` on clear and
-/// drop. Passing the secret to PAM necessarily creates copies owned by PAM;
-/// this type cannot erase those external copies.
+/// drop. On Linux it is also locked with `mlock(2)` when the process limit
+/// permits, reducing exposure to swap. Passing the secret to PAM necessarily
+/// creates copies owned by PAM; this type cannot lock or erase those external
+/// copies.
 pub struct SecretBuffer {
     storage: Vec<u8>,
     used: usize,
+    memory_locked: bool,
 }
 
 impl SecretBuffer {
@@ -49,7 +52,12 @@ impl SecretBuffer {
             .try_reserve_exact(capacity)
             .map_err(|_| SecretError::AllocationFailed)?;
         storage.resize(capacity, 0);
-        Ok(Self { storage, used: 0 })
+        let memory_locked = lock_memory(&storage);
+        Ok(Self {
+            storage,
+            used: 0,
+            memory_locked,
+        })
     }
 
     pub fn standard() -> Result<Self, SecretError> {
@@ -69,6 +77,12 @@ impl SecretBuffer {
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.storage.len()
+    }
+
+    /// Whether the controlled allocation was successfully excluded from swap.
+    #[must_use]
+    pub const fn is_memory_locked(&self) -> bool {
+        self.memory_locked
     }
 
     #[must_use]
@@ -137,8 +151,37 @@ impl fmt::Debug for SecretBuffer {
 impl Drop for SecretBuffer {
     fn drop(&mut self) {
         self.clear();
+        if self.memory_locked {
+            unlock_memory(&self.storage);
+            self.memory_locked = false;
+        }
     }
 }
+
+#[cfg(target_os = "linux")]
+fn lock_memory(bytes: &[u8]) -> bool {
+    // SAFETY: `bytes` is a live allocation for exactly `len` bytes and remains
+    // at the same address for the lifetime of SecretBuffer. `mlock` retains no
+    // ownership and accepts read-only pointers despite its C `void *` type.
+    unsafe { libc::mlock(bytes.as_ptr().cast(), bytes.len()) == 0 }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn lock_memory(_bytes: &[u8]) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn unlock_memory(bytes: &[u8]) {
+    // SAFETY: this is the same live allocation and length previously passed
+    // to a successful `mlock`. The allocation is released only after return.
+    unsafe {
+        libc::munlock(bytes.as_ptr().cast(), bytes.len());
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn unlock_memory(_bytes: &[u8]) {}
 
 fn wipe(bytes: &mut [u8]) {
     if bytes.is_empty() {
@@ -207,5 +250,15 @@ mod tests {
         let debug = format!("{secret:?}");
         assert!(!debug.contains("do-not-print"));
         assert!(debug.contains("<redacted>"));
+    }
+
+    #[test]
+    fn memory_lock_status_does_not_change_buffer_semantics() {
+        let mut secret = SecretBuffer::new(32).unwrap();
+        let _status = secret.is_memory_locked();
+        secret.push_str("still-secret").unwrap();
+        assert_eq!(secret.as_bytes(), b"still-secret");
+        secret.clear();
+        assert!(secret.storage.iter().all(|byte| *byte == 0));
     }
 }
