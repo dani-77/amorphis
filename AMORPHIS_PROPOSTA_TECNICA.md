@@ -369,10 +369,13 @@ Concluído no primeiro incremento da Fase B:
 - testes unitários, `clippy -D warnings` e build otimizada.
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,
-multi-monitor físico, suspend/resume e PAM por distribuição; validação real da
-captura Wayland fora de Wasp/wlroots, feedback visual e endurecimento final de
-empacotamento. A captura X11 com blur/pixelização já foi validada numa sessão
-Xorg real. Duas capturas independentes e o redimensionamento RandR foram também
-validados num Xephyr descartável com dois X screens de resoluções diferentes.
-No Wayland, um Wasp nested com dois outputs confirmou cobertura simultânea e
-capturas pixelizadas distintas por `wl_output`.
+multi-monitor físico, ciclos adicionais de suspensão/retoma e PAM por
+distribuição; validação real da captura Wayland fora de Wasp/wlroots, feedback
+visual e endurecimento final de empacotamento. A captura X11 com
+blur/pixelização já foi validada numa sessão Xorg real. Duas capturas
+independentes e o redimensionamento RandR foram também validados num Xephyr
+descartável com dois X screens de resoluções diferentes. No Wayland, um Wasp
+nested com dois outputs confirmou cobertura simultânea e capturas pixelizadas
+distintas por `wl_output`. Um ciclo real de suspensão/retoma sob Wasp manteve a
+cobertura com captura e efeitos, recusou duas tentativas PAM falhadas e só
+desbloqueou após autenticação correta.

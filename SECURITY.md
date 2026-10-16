@@ -1,8 +1,10 @@
 # Security status
 
 Amorphis is pre-release software and has not yet completed its compositor,
-distribution, suspend/resume, or hostile-input test matrix. Do not presently
-use it as the sole protection for an important session.
+distribution, repeated suspend/resume, or hostile-input test matrix. One real
+Wayland suspend/resume cycle has retained full coverage and rejected failed PAM
+attempts, but this is not yet broad regression coverage. Do not presently use
+Amorphis as the sole protection for an important session.
 
 Before locking, Amorphis disables core dumps and, on Linux, marks the process
 non-dumpable. The controlled password buffer has a fixed capacity and is erased
