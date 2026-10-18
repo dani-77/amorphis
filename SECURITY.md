@@ -33,6 +33,10 @@ the process exits, and processes effects only after the lock request begins.
 Unsupported protocols, formats, transforms, timeouts, and runtime failures fall
 back to the embedded image and then the opaque solid background.
 
+The Wayland path has been exercised on Wasp/wlroots as a real login session and
+on Spitfire/Smithay as a nested session. This is useful cross-compositor
+coverage, but it is not a claim of universal Wayland compatibility.
+
 The X11 backend provides weaker guarantees inherent to X11. It uses opaque
 override-redirect windows, verified keyboard and pointer grabs, RandR resize
 handling, and re-raising on other top-level activity. Every X screen/root is

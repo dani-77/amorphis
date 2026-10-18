@@ -12,7 +12,7 @@ and optional blurred or pixelated backgrounds without turning the lock screen
 into a desktop shell.
 
 It is still pre-release software. The Wayland backend has been smoke-tested on
-Wasp and the X11 backend on Xorg, but the full compositor, physical
+Wasp and Spitfire and the X11 backend on Xorg, but the full compositor, physical
 multi-monitor, repeated suspend/resume, and hostile-input test matrix is not
 complete. Do not yet rely on Amorphis as the sole protection for an important
 session.
@@ -145,7 +145,7 @@ pixelation, including desktop capture with the combined effect. The wider
 security matrix still requires live testing. X11 desktop capture has also been
 smoke-tested under Xephyr. Wayland per-output capture has been smoke-tested on
 a nested Wasp instance with two virtual outputs and distinct content on each;
-physical multi-monitor and broader compositor testing remain pending.
+physical multi-monitor and further compositor testing remain pending.
 A real Wayland suspend/resume cycle was also completed while capture with
 combined blur/pixelation was active: the lock remained covered after resume,
 rejected two failed authentication attempts, and unlocked normally only after
@@ -154,6 +154,10 @@ The authentication indicator has automated renderer/state coverage and has
 been smoke-tested with injected input and a rejected PAM attempt under Xephyr;
 input, animated verification, timed failure feedback, and successful unlock
 have also been confirmed visually in a real Wayland session.
+A nested Spitfire 0.5.3 session (Smithay) separately confirmed protocol
+discovery, native output capture, pixelation, session-lock coverage, and PAM
+unlock. This broadens compositor coverage beyond Wasp/wlroots, but does not
+replace testing Spitfire as the physical login session.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on

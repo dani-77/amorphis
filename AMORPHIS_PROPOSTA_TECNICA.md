@@ -378,8 +378,7 @@ Concluído no primeiro incremento da Fase B:
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,
 multi-monitor físico, ciclos adicionais de suspensão/retoma e PAM por
-distribuição; validação real da captura Wayland fora de Wasp/wlroots e
-endurecimento final de empacotamento. A captura X11 com
+distribuição e endurecimento final de empacotamento. A captura X11 com
 blur/pixelização já foi validada numa sessão Xorg real. Duas capturas
 independentes e o redimensionamento RandR foram também validados num Xephyr
 descartável com dois X screens de resoluções diferentes. No Wayland, um Wasp
@@ -391,3 +390,7 @@ O indicador foi validado automaticamente sob Xephyr com input injetado,
 expiração do estado de input e uma tentativa PAM deliberadamente rejeitada.
 Input, animação durante PAM, erro temporizado e desbloqueio correto foram
 também confirmados visualmente numa sessão Wayland real.
+Um Spitfire 0.5.3 aninhado, baseado em Smithay, anunciou os três protocolos
+Wayland necessários e confirmou captura nativa do output com pixelização,
+session-lock e desbloqueio PAM. Este teste alarga a cobertura para fora de
+Wasp/wlroots, embora não substitua uma sessão física Spitfire.
