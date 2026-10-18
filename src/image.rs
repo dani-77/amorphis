@@ -517,6 +517,20 @@ mod tests {
             RgbaImage::solid(33, 1, [0; 4], LIMITS),
             Err(ImageError::DimensionLimit)
         );
+
+        let mut pixel_limited = LIMITS;
+        pixel_limited.max_pixels = 3;
+        assert_eq!(
+            RgbaImage::solid(2, 2, [0; 4], pixel_limited),
+            Err(ImageError::PixelLimit)
+        );
+
+        let mut byte_limited = LIMITS;
+        byte_limited.max_bytes = 15;
+        assert_eq!(
+            RgbaImage::solid(2, 2, [0; 4], byte_limited),
+            Err(ImageError::ByteLimit)
+        );
     }
 
     #[test]

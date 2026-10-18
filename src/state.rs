@@ -217,6 +217,68 @@ mod tests {
         assert_eq!(machine.state(), LockState::Locked);
     }
 
+    #[test]
+    fn complete_transition_table_has_no_implicit_unlock_path() {
+        let states = [
+            LockState::Starting,
+            LockState::LockRequested,
+            LockState::Locked,
+            LockState::Authenticating,
+            LockState::UnlockAuthorized,
+            LockState::Unlocking,
+            LockState::Finished,
+            LockState::FailedToLock,
+        ];
+        let events = [
+            LockEvent::RequestLock,
+            LockEvent::LockConfirmed,
+            LockEvent::LockRefused,
+            LockEvent::BeginAuthentication,
+            LockEvent::AuthenticationFailed,
+            LockEvent::AuthenticationSucceeded,
+            LockEvent::BeginUnlock,
+            LockEvent::UnlockCompleted,
+        ];
+
+        for state in states {
+            for event in events {
+                let expected = match (state, event) {
+                    (LockState::Starting, LockEvent::RequestLock) => Some(LockState::LockRequested),
+                    (LockState::LockRequested, LockEvent::LockConfirmed) => Some(LockState::Locked),
+                    (LockState::LockRequested, LockEvent::LockRefused) => {
+                        Some(LockState::FailedToLock)
+                    }
+                    (LockState::Locked, LockEvent::BeginAuthentication) => {
+                        Some(LockState::Authenticating)
+                    }
+                    (LockState::Authenticating, LockEvent::AuthenticationFailed) => {
+                        Some(LockState::Locked)
+                    }
+                    (LockState::Authenticating, LockEvent::AuthenticationSucceeded) => {
+                        Some(LockState::UnlockAuthorized)
+                    }
+                    (LockState::UnlockAuthorized, LockEvent::BeginUnlock) => {
+                        Some(LockState::Unlocking)
+                    }
+                    (LockState::Unlocking, LockEvent::UnlockCompleted) => Some(LockState::Finished),
+                    _ => None,
+                };
+
+                let mut machine = LockMachine { state };
+                match expected {
+                    Some(next) => assert_eq!(machine.apply(event), Ok(next)),
+                    None => {
+                        assert_eq!(
+                            machine.apply(event),
+                            Err(InvalidTransition { state, event })
+                        );
+                        assert_eq!(machine.state(), state);
+                    }
+                }
+            }
+        }
+    }
+
     fn locked_machine() -> LockMachine {
         let mut machine = LockMachine::new();
         machine.apply(LockEvent::RequestLock).unwrap();

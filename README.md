@@ -173,6 +173,18 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo audit
+cargo deny check
+cargo deny --manifest-path fuzz/Cargo.toml --config fuzz/deny.toml check
+```
+
+The `fuzz/` workspace contains bounded libFuzzer targets for command-line
+parsing, PNG decoding, and image effects/fitting. With `cargo-fuzz` and a
+nightly Rust toolchain installed, run for example:
+
+```sh
+cargo fuzz run cli -- -max_len=4096
+cargo fuzz run png_decode -- -max_len=1048576
+cargo fuzz run image_ops -- -max_len=4096
 ```
 
 With Xephyr and ImageMagick installed, the disposable two-screen X11 smoke test

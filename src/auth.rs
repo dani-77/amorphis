@@ -300,4 +300,32 @@ mod tests {
         assert!(matches!(rejected, Err(SubmitError::Busy(_))));
         release.wait();
     }
+
+    struct PanickingProvider;
+
+    impl AuthProvider for PanickingProvider {
+        fn authenticate(&mut self, _secret: SecretBuffer) -> AuthOutcome {
+            panic!("simulated PAM worker failure");
+        }
+    }
+
+    #[test]
+    fn worker_panic_disconnects_without_returning_success() {
+        let mut worker = AuthWorker::spawn(PanickingProvider).unwrap();
+        worker.submit(SecretBuffer::new(8).unwrap()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match worker.try_response() {
+                Err(WorkerStopped) => break,
+                Ok(None) => {
+                    assert!(Instant::now() < deadline, "worker did not disconnect");
+                    thread::yield_now();
+                }
+                Ok(Some(response)) => {
+                    panic!("panicking provider returned a response: {response:?}")
+                }
+            }
+        }
+    }
 }

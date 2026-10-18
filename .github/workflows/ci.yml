@@ -47,6 +47,11 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked
 
+      - name: Check fuzz harnesses
+        run: |
+          cargo fmt --all --manifest-path fuzz/Cargo.toml --check
+          cargo check --manifest-path fuzz/Cargo.toml --bins --locked
+
   dependencies:
     name: Dependency policy
     runs-on: ubuntu-24.04
@@ -60,3 +65,10 @@ jobs:
         with:
           command: check
           arguments: --all-features
+
+      - name: Check fuzz dependencies
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features --config fuzz/deny.toml
+          manifest-path: fuzz/Cargo.toml

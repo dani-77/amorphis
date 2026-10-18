@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod backend;
 pub mod background;
+pub mod cli;
 pub mod image;
 mod indicator;
 pub mod secret;
