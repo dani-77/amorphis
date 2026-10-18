@@ -12,10 +12,10 @@ and optional blurred or pixelated backgrounds without turning the lock screen
 into a desktop shell.
 
 It is still pre-release software. The Wayland backend has been smoke-tested on
-Wasp and Spitfire and the X11 backend on Xorg, but the full compositor, physical
-multi-monitor, repeated suspend/resume, and hostile-input test matrix is not
-complete. Do not yet rely on Amorphis as the sole protection for an important
-session.
+Wasp, Spitfire, and Hyprland and the X11 backend on Xorg, but the full
+compositor, physical multi-monitor, repeated suspend/resume, and hostile-input
+test matrix is not complete. Do not yet rely on Amorphis as the sole protection
+for an important session.
 
 ## Features
 
@@ -158,6 +158,9 @@ A physical Spitfire 0.5.3 login session (Smithay) separately confirmed protocol
 discovery, native output capture, pixelation, session-lock coverage, rejected
 PAM feedback, and successful PAM unlock. A prior nested test reached the same
 capture and unlock path.
+A physical Hyprland 0.56.2 session, running with system Aquamarine 0.15.1,
+confirmed all three required protocols, native output capture with pixelation,
+rejected PAM feedback, continued lock coverage, and successful PAM unlock.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on

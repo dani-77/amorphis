@@ -395,3 +395,7 @@ protocolos Wayland necessários e confirmou captura nativa do output com
 pixelização, session-lock, feedback após rejeição PAM e desbloqueio correto.
 Um teste aninhado anterior já tinha confirmado o mesmo caminho de captura e
 desbloqueio.
+Uma sessão física Hyprland 0.56.2, compilada para Aquamarine 0.15.0 e executada
+com Aquamarine 0.15.1, anunciou igualmente os três protocolos, capturou e
+pixelizou o output, manteve o bloqueio após uma rejeição PAM com feedback
+vermelho e desbloqueou apenas com a palavra-passe correta.
