@@ -1,10 +1,10 @@
 # Security status
 
 Amorphis is pre-release software and has not yet completed its compositor,
-distribution, repeated suspend/resume, or hostile-input test matrix. One real
-Wayland suspend/resume cycle has retained full coverage and rejected failed PAM
-attempts, but this is not yet broad regression coverage. Do not presently use
-Amorphis as the sole protection for an important session.
+physical multi-monitor, repeated suspend/resume, or extended hostile-input test
+matrix. One real Wayland suspend/resume cycle has retained full coverage and
+rejected failed PAM attempts, but this is not yet broad regression coverage. Do
+not presently use Amorphis as the sole protection for an important session.
 
 Before locking, Amorphis disables core dumps and, on Linux, marks the process
 non-dumpable. The controlled password buffer has a fixed capacity and is erased
@@ -19,6 +19,18 @@ The lockfile was scanned against 1,329 RustSec advisories on 2026-10-16; no
 known vulnerability was reported among its 75 crates. This is a point-in-time
 result, not a substitute for repeating `cargo audit` as advisories and the
 lockfile change.
+
+The command-line parser, PNG decoder, and bounded image transformations have
+completed AddressSanitizer-backed libFuzzer runs locally and in GitHub Actions
+without a crash. A scheduled workflow repeats short runs weekly. This improves
+hostile-input coverage but does not prove the absence of memory, resource, or
+logic errors.
+
+The project's direct `unsafe` blocks were manually reviewed on 2026-10-18.
+They are limited to process hardening and Unix account lookup in `system.rs`,
+plus memory locking, unlocking, and explicit erasure in `secret.rs`; every
+block documents its pointer/lifetime preconditions. This review does not cover
+unsafe internals of dependencies.
 
 The Wayland backend only uses `ext-session-lock-v1`. It never substitutes a
 normal fullscreen, layer-shell, or XWayland window for a real session lock.

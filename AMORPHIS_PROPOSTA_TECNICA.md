@@ -374,11 +374,20 @@ Concluído no primeiro incremento da Fase B:
   e `mlock` de melhor esforço no buffer controlado da palavra-passe;
 - auditoria RustSec inicial das 75 crates do lockfile sem vulnerabilidades
   conhecidas;
-- testes unitários, `clippy -D warnings` e build otimizada.
+- CI para formatação, 51 testes unitários, `clippy -D warnings`, build
+  otimizada, compilação dos harnesses e política `cargo-deny`;
+- fuzzing limitado sob AddressSanitizer do parser CLI, descodificador PNG e
+  operações de imagem, com execução semanal automatizada e sem crashes na
+  campanha inicial local/GitHub;
+- revisão manual dos blocos `unsafe` próprios, todos limitados às chamadas de
+  sistema documentadas em `secret.rs` e `system.rs`;
+- template Void parametrizado, validado através da criação de um pacote XBPS
+  num checkout limpo de `void-packages`.
 
 Ainda por validar/implementar: a matriz alargada de compositores/servidores,
 multi-monitor físico, ciclos adicionais de suspensão/retoma e PAM por
-distribuição e endurecimento final de empacotamento. A captura X11 com
+distribuição, testes hostis prolongados e validação final do pacote de release.
+A captura X11 com
 blur/pixelização já foi validada numa sessão Xorg real. Duas capturas
 independentes e o redimensionamento RandR foram também validados num Xephyr
 descartável com dois X screens de resoluções diferentes. No Wayland, um Wasp

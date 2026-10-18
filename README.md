@@ -13,7 +13,7 @@ into a desktop shell.
 
 It is still pre-release software. The Wayland backend has been smoke-tested on
 Wasp, Spitfire, and Hyprland and the X11 backend on Xorg, but the full
-compositor, physical multi-monitor, repeated suspend/resume, and hostile-input
+physical multi-monitor, repeated suspend/resume, and extended hostile-input
 test matrix is not complete. Do not yet rely on Amorphis as the sole protection
 for an important session.
 
@@ -161,6 +161,13 @@ capture and unlock path.
 A physical Hyprland 0.56.2 session, running with system Aquamarine 0.15.1,
 confirmed all three required protocols, native output capture with pixelation,
 rejected PAM feedback, continued lock coverage, and successful PAM unlock.
+The command-line parser, PNG decoder, and bounded image operations have also
+completed local and GitHub-hosted libFuzzer runs under AddressSanitizer without
+a crash. CI now checks formatting, all 51 unit tests, Clippy, release builds,
+fuzz-harness compilation, advisories, dependency bans, licenses, and sources.
+The parameterized Void template has produced a valid XBPS package in a clean
+`void-packages` tree; its final release checksum intentionally remains pending
+until a tag exists.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on
@@ -187,6 +194,9 @@ cargo fuzz run png_decode -- -max_len=1048576
 cargo fuzz run image_ops -- -max_len=4096
 ```
 
+GitHub Actions repeats a bounded run of all three targets every Sunday and can
+also be started manually from the `Fuzz` workflow.
+
 With Xephyr and ImageMagick installed, the disposable two-screen X11 smoke test
 also checks per-root capture and RandR resizing without locking the host display:
 
@@ -199,6 +209,8 @@ tests are documented in:
 
 - [`AMORPHIS_DIRECAO.md`](AMORPHIS_DIRECAO.md)
 - [`AMORPHIS_PROPOSTA_TECNICA.md`](AMORPHIS_PROPOSTA_TECNICA.md)
+- [`CHANGELOG.md`](CHANGELOG.md)
+- [`RELEASING.md`](RELEASING.md)
 
 ## License
 
