@@ -390,7 +390,8 @@ O indicador foi validado automaticamente sob Xephyr com input injetado,
 expiração do estado de input e uma tentativa PAM deliberadamente rejeitada.
 Input, animação durante PAM, erro temporizado e desbloqueio correto foram
 também confirmados visualmente numa sessão Wayland real.
-Um Spitfire 0.5.3 aninhado, baseado em Smithay, anunciou os três protocolos
-Wayland necessários e confirmou captura nativa do output com pixelização,
-session-lock e desbloqueio PAM. Este teste alarga a cobertura para fora de
-Wasp/wlroots, embora não substitua uma sessão física Spitfire.
+Uma sessão física Spitfire 0.5.3, baseada em Smithay, anunciou os três
+protocolos Wayland necessários e confirmou captura nativa do output com
+pixelização, session-lock, feedback após rejeição PAM e desbloqueio correto.
+Um teste aninhado anterior já tinha confirmado o mesmo caminho de captura e
+desbloqueio.

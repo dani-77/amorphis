@@ -154,10 +154,10 @@ The authentication indicator has automated renderer/state coverage and has
 been smoke-tested with injected input and a rejected PAM attempt under Xephyr;
 input, animated verification, timed failure feedback, and successful unlock
 have also been confirmed visually in a real Wayland session.
-A nested Spitfire 0.5.3 session (Smithay) separately confirmed protocol
-discovery, native output capture, pixelation, session-lock coverage, and PAM
-unlock. This broadens compositor coverage beyond Wasp/wlroots, but does not
-replace testing Spitfire as the physical login session.
+A physical Spitfire 0.5.3 login session (Smithay) separately confirmed protocol
+discovery, native output capture, pixelation, session-lock coverage, rejected
+PAM feedback, and successful PAM unlock. A prior nested test reached the same
+capture and unlock path.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on
