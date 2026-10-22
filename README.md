@@ -11,11 +11,11 @@ program, PAM authentication, real locking mechanisms for both display systems,
 and optional blurred or pixelated backgrounds without turning the lock screen
 into a desktop shell.
 
-It is still pre-release software. The Wayland backend has been smoke-tested on
-Wasp, Spitfire, Hyprland, and SomeWM and the X11 backend on Xorg, but the full
-physical multi-monitor, repeated suspend/resume, and extended hostile-input
-test matrix is not complete. Do not yet rely on Amorphis as the sole protection
-for an important session.
+Amorphis is still early-stage software. The Wayland backend has been
+smoke-tested on Wasp, Spitfire, Hyprland, and SomeWM and the X11 backend on
+Xorg, but the full physical multi-monitor, repeated suspend/resume, and
+extended hostile-input test matrix is not complete. Do not yet rely on Amorphis
+as the sole protection for an important session.
 
 ## Features
 

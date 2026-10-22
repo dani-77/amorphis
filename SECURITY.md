@@ -1,6 +1,6 @@
 # Security status
 
-Amorphis is pre-release software and has not yet completed its repeated
+Amorphis is early-stage software and has not yet completed its repeated
 suspend/resume or extended hostile-input test matrix. One real Wayland
 suspend/resume cycle has retained full coverage and rejected failed PAM
 attempts, but this is not yet broad regression coverage. Do not presently use

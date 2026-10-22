@@ -17,8 +17,8 @@ Completed:
 
 Pending before a public package release:
 
-- [ ] decide how release archives will be made accessible while the GitHub
-  repository is private;
+- [x] make release archives publicly accessible by opening the GitHub
+  repository;
 - [ ] create and push the signed `v0.1.0` tag;
 - [ ] calculate the tagged archive SHA-256 and finalize `contrib/void/template`;
 - [ ] build, inspect, and install the final XBPS package;
