@@ -5,7 +5,7 @@
 Completed:
 
 - [x] version and release profile set in `Cargo.toml`;
-- [x] Wayland tests in real Wasp, Spitfire, and Hyprland sessions;
+- [x] Wayland tests in real Wasp, Spitfire, Hyprland, and SomeWM sessions;
 - [x] X11 tests in a real Xorg session and disposable two-screen Xephyr;
 - [x] one real Wayland suspend/resume authentication cycle;
 - [x] formatting, 51 unit tests, Clippy, and release build in CI;
