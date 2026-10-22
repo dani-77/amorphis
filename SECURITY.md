@@ -45,10 +45,12 @@ the process exits, and processes effects only after the lock request begins.
 Unsupported protocols, formats, transforms, timeouts, and runtime failures fall
 back to the embedded image and then the opaque solid background.
 
-The Wayland path has been exercised on Wasp/wlroots, Spitfire/Smithay, and
-Hyprland/Aquamarine as real login sessions, with an additional nested Spitfire
-test. This is useful cross-compositor coverage, but it is not a claim of
-universal Wayland compatibility.
+The Wayland path has been exercised on Wasp/wlroots, Spitfire/Smithay,
+Hyprland/Aquamarine, and SomeWM/wlroots as real login sessions, with an
+additional nested Spitfire test. A headless SomeWM 2.1.0 regression test also
+confirmed stable lock-surface focus and injected keyboard delivery. This is
+useful cross-compositor coverage, but it is not a claim of universal Wayland
+compatibility.
 
 The X11 backend provides weaker guarantees inherent to X11. It uses opaque
 override-redirect windows, verified keyboard and pointer grabs, RandR resize

@@ -46,6 +46,7 @@ pub enum WaylandError {
     EventLoop(String),
     EventSource(String),
     LockProtocolUnavailable,
+    NoKeyboard,
     LockRefused,
     AuthenticationWorker(String),
     AuthenticationStopped,
@@ -66,6 +67,7 @@ impl fmt::Display for WaylandError {
             Self::LockProtocolUnavailable => {
                 f.write_str("compositor does not support ext-session-lock-v1")
             }
+            Self::NoKeyboard => f.write_str("no Wayland keyboard is available; refusing to lock"),
             Self::LockRefused => f.write_str("compositor refused the session lock request"),
             Self::AuthenticationWorker(message) => {
                 write!(f, "could not create authentication worker: {message}")
@@ -96,7 +98,7 @@ pub fn run(
     } = prepare_background(static_background, limits);
     let conn =
         Connection::connect_to_env().map_err(|error| WaylandError::Connect(error.to_string()))?;
-    let (globals, event_queue) =
+    let (globals, mut event_queue) =
         registry_queue_init(&conn).map_err(|error| WaylandError::Registry(error.to_string()))?;
     let qh: QueueHandle<WaylandApp> = event_queue.handle();
 
@@ -139,6 +141,21 @@ pub fn run(
         indicator: AuthIndicator::default(),
     };
 
+    // Bind input devices before asking the compositor to lock. Some compositors
+    // focus a lock surface only once, as it is created. If wl_keyboard is bound
+    // afterwards, that initial enter event is lost and the lock cannot receive
+    // a password. The second roundtrip makes the get_keyboard request issued by
+    // the first one visible to the compositor before the lock request.
+    event_queue
+        .roundtrip(&mut app)
+        .map_err(|error| WaylandError::ConnectionLost(error.to_string()))?;
+    if app.keyboards.is_empty() {
+        return Err(WaylandError::NoKeyboard);
+    }
+    event_queue
+        .roundtrip(&mut app)
+        .map_err(|error| WaylandError::ConnectionLost(error.to_string()))?;
+
     app.machine
         .apply(LockEvent::RequestLock)
         .map_err(|_| WaylandError::ProtocolState)?;
@@ -152,6 +169,27 @@ pub fn run(
         }
     };
     app.session_lock = Some(lock);
+
+    // Put the lock request and lock-surface creation in separate server
+    // dispatches. This avoids a focus race in compositors that defer clearing
+    // the previously focused surface: if a lock surface is created in the same
+    // request batch, that deferred clear can otherwise remove its keyboard
+    // focus immediately after wl_keyboard enter. Some compositors confirm the
+    // lock now, while others wait until the surfaces have been committed, so
+    // both LockRequested and Locked are valid states after this roundtrip.
+    event_queue
+        .roundtrip(&mut app)
+        .map_err(|error| WaylandError::ConnectionLost(error.to_string()))?;
+    if let Some(exit) = app.exit.take() {
+        return exit;
+    }
+    if !matches!(
+        app.machine.state(),
+        LockState::LockRequested | LockState::Locked
+    ) {
+        return Err(WaylandError::ProtocolState);
+    }
+
     if let Some((outputs, effect)) = pending_capture {
         match start_capture_processor(outputs, effect, limits) {
             Ok(receiver) => app.capture_rx = Some(receiver),

@@ -12,7 +12,7 @@ and optional blurred or pixelated backgrounds without turning the lock screen
 into a desktop shell.
 
 It is still pre-release software. The Wayland backend has been smoke-tested on
-Wasp, Spitfire, and Hyprland and the X11 backend on Xorg, but the full
+Wasp, Spitfire, Hyprland, and SomeWM and the X11 backend on Xorg, but the full
 physical multi-monitor, repeated suspend/resume, and extended hostile-input
 test matrix is not complete. Do not yet rely on Amorphis as the sole protection
 for an important session.
@@ -161,6 +161,11 @@ capture and unlock path.
 A physical Hyprland 0.56.2 session, running with system Aquamarine 0.15.1,
 confirmed all three required protocols, native output capture with pixelation,
 rejected PAM feedback, continued lock coverage, and successful PAM unlock.
+A headless SomeWM 2.1.0 regression test confirmed stable lock-surface keyboard
+focus and injected key delivery after aligning Wayland initialization with
+swaylock's lock-request ordering. A physical SomeWM session then confirmed the
+embedded fallback with pixelation, rejected PAM feedback, and successful PAM
+unlock.
 The command-line parser, PNG decoder, and bounded image operations have also
 completed local and GitHub-hosted libFuzzer runs under AddressSanitizer without
 a crash. CI now checks formatting, all 51 unit tests, Clippy, release builds,

@@ -7,7 +7,7 @@ All notable changes to Amorphis will be documented in this file.
 ### Added
 
 - Fail-closed Wayland locking through `ext-session-lock-v1`, tested on Wasp,
-  Spitfire, and Hyprland.
+  Spitfire, Hyprland, and SomeWM.
 - X11 locking with verified keyboard/pointer grabs and RandR handling.
 - PAM authentication with fixed-capacity secret storage, explicit erasure,
   process hardening, and best-effort memory locking.
@@ -23,5 +23,12 @@ All notable changes to Amorphis will be documented in this file.
   reports successful authentication and account validation.
 - Image dimensions, allocations, blur scratch space, password capacity, and
   capture time are explicitly bounded.
+
+### Fixed
+
+- Initialize Wayland keyboard input before requesting a session lock, refuse to
+  lock when no keyboard is available, and process the lock request separately
+  from surface creation. This prevents keyboard-focus races seen on SomeWM
+  2.1.0 while preserving compositor-specific lock-confirmation ordering.
 
 [0.1.0]: https://github.com/dani-77/amorphis/releases/tag/v0.1.0
