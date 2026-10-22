@@ -19,10 +19,10 @@ Pending before a public package release:
 
 - [x] make release archives publicly accessible by opening the GitHub
   repository;
-- [ ] create and push the signed `v0.1.0` tag;
-- [ ] calculate the tagged archive SHA-256 and finalize `contrib/void/template`;
-- [ ] build, inspect, and install the final XBPS package;
-- [ ] create the GitHub release from `CHANGELOG.md`.
+- [x] create and push the signed `v0.1.0` tag;
+- [x] calculate the tagged archive SHA-256 and finalize `contrib/void/template`;
+- [x] build, inspect, and install the final XBPS package;
+- [x] create the GitHub release from `CHANGELOG.md`.
 
 Additional multi-monitor topologies and suspend/resume cycles remain desirable
 and must stay documented as coverage limitations if they are not completed

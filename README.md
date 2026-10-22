@@ -173,9 +173,9 @@ The command-line parser, PNG decoder, and bounded image operations have also
 completed local and GitHub-hosted libFuzzer runs under AddressSanitizer without
 a crash. CI now checks formatting, all 51 unit tests, Clippy, release builds,
 fuzz-harness compilation, advisories, dependency bans, licenses, and sources.
-The parameterized Void template has produced a valid XBPS package in a clean
-`void-packages` tree; its final release checksum intentionally remains pending
-until a tag exists.
+The finalized Void template has produced and installed a valid
+`amorphis-0.1.0_1` XBPS package from the public signed tag in a clean
+`void-packages` tree.
 
 See [SECURITY.md](SECURITY.md) before relying on either backend. X11 cannot
 retain a lock if the process or X server is killed; Wayland support depends on
