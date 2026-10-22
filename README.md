@@ -144,8 +144,11 @@ keyboard and pointer capture, PAM unlock, the embedded fallback, blur, and
 pixelation, including desktop capture with the combined effect. The wider
 security matrix still requires live testing. X11 desktop capture has also been
 smoke-tested under Xephyr. Wayland per-output capture has been smoke-tested on
-a nested Wasp instance with two virtual outputs and distinct content on each;
-physical multi-monitor and further compositor testing remain pending.
+a nested Wasp instance with two virtual outputs and distinct content on each.
+A physical two-output Wasp session subsequently confirmed simultaneous
+pixelated coverage; disconnecting and reconnecting HDMI while locked kept the
+internal display covered and gave the returning output an immediate opaque
+solid frame, as designed.
 A real Wayland suspend/resume cycle was also completed while capture with
 combined blur/pixelation was active: the lock remained covered after resume,
 rejected two failed authentication attempts, and unlocked normally only after

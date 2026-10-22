@@ -6,6 +6,7 @@ Completed:
 
 - [x] version and release profile set in `Cargo.toml`;
 - [x] Wayland tests in real Wasp, Spitfire, Hyprland, and SomeWM sessions;
+- [x] physical two-output Wayland coverage and HDMI hotplug while locked;
 - [x] X11 tests in a real Xorg session and disposable two-screen Xephyr;
 - [x] one real Wayland suspend/resume authentication cycle;
 - [x] formatting, 51 unit tests, Clippy, and release build in CI;
@@ -23,9 +24,9 @@ Pending before a public package release:
 - [ ] build, inspect, and install the final XBPS package;
 - [ ] create the GitHub release from `CHANGELOG.md`.
 
-Physical multi-monitor and additional suspend/resume tests remain desirable and
-must stay documented as coverage limitations if they are not completed before
-v0.1.0.
+Additional multi-monitor topologies and suspend/resume cycles remain desirable
+and must stay documented as coverage limitations if they are not completed
+before v0.1.0.
 
 ## Release procedure
 

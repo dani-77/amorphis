@@ -1,10 +1,10 @@
 # Security status
 
-Amorphis is pre-release software and has not yet completed its compositor,
-physical multi-monitor, repeated suspend/resume, or extended hostile-input test
-matrix. One real Wayland suspend/resume cycle has retained full coverage and
-rejected failed PAM attempts, but this is not yet broad regression coverage. Do
-not presently use Amorphis as the sole protection for an important session.
+Amorphis is pre-release software and has not yet completed its repeated
+suspend/resume or extended hostile-input test matrix. One real Wayland
+suspend/resume cycle has retained full coverage and rejected failed PAM
+attempts, but this is not yet broad regression coverage. Do not presently use
+Amorphis as the sole protection for an important session.
 
 Before locking, Amorphis disables core dumps and, on Linux, marks the process
 non-dumpable. The controlled password buffer has a fixed capacity and is erased
@@ -51,6 +51,11 @@ additional nested Spitfire test. A headless SomeWM 2.1.0 regression test also
 confirmed stable lock-surface focus and injected keyboard delivery. This is
 useful cross-compositor coverage, but it is not a claim of universal Wayland
 compatibility.
+
+A physical two-output Wasp session confirmed simultaneous coverage and output
+hotplug while locked. Disconnecting HDMI left the internal output covered;
+reconnecting it produced an immediate opaque solid lock frame because no
+pre-lock capture exists for a newly returned output.
 
 The X11 backend provides weaker guarantees inherent to X11. It uses opaque
 override-redirect windows, verified keyboard and pointer grabs, RandR resize
