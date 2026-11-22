@@ -58,6 +58,7 @@ Build and install Amorphis and its PAM policy:
 ```sh
 git clone https://github.com/dani-77/amorphis.git
 cd amorphis
+make
 sudo make install
 sudo install -o root -g root -m0644 \
   contrib/pam/amorphis.void /etc/pam.d/amorphis
@@ -84,6 +85,9 @@ Before running it, install a distribution-appropriate PAM policy named
 
 ## Using it
 
+For setup, accepted TOML keys, and complete examples, see the
+[configuration guide](CONFIGURATION.md).
+
 Running `amorphis` without arguments detects X11 or Wayland and reads
 `x11.toml` or `wayland.toml` from `${XDG_CONFIG_HOME:-$HOME/.config}/amorphis/`.
 If the profile is absent, the normal embedded background is used. An invalid
@@ -105,7 +109,8 @@ the current user. Each `[[rule]]` needs a positive `timeout` in seconds and a
 `command`, `command_x11`, or `command_wayland` applicable to the active session.
 A session-specific command takes priority over `command`. Optional
 `resume_command` runs after activity returns if the idle command fired. Commands
-are passed to `sh -c`. For example:
+are passed to `sh -c`. Activity may return while the locker is still open, so
+`resume_command` is not a post-unlock hook. For example:
 
 ```toml
 [[rule]]
