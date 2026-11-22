@@ -171,6 +171,14 @@ an opaque solid frame even when no pre-lock capture exists for them.
 
 ## Current status
 
+The no-argument session selection and `amorphis-idle` have been validated in
+real sessions: Wasp, Spitfire, Whiplash, and Niri on Wayland, plus PWM on Xorg.
+Each session completed two 60-second idle, lock, unlock, and resume cycles.
+PWM selected `command_x11` and launched `slock`; the Wayland sessions selected
+`command_wayland` even where `DISPLAY` was present. A failed password attempt
+on Wasp kept the session locked until a correct attempt. These tests used
+temporary user configuration and stopped the daemon after the second cycle.
+
 The Wayland path has been tested on Wasp 0.9.1 / wlroots 0.20.2 with PAM, the
 embedded fallback, a 7680×4320 custom PNG, native desktop capture, and combined
 blur/pixelation. The X11 path has been tested in a real Xorg session with
