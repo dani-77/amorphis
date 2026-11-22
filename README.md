@@ -58,8 +58,7 @@ Build and install Amorphis and its PAM policy:
 ```sh
 git clone https://github.com/dani-77/amorphis.git
 cd amorphis
-cargo build --release
-sudo install -Dm755 target/release/amorphis /usr/local/bin/amorphis
+sudo make install
 sudo install -o root -g root -m0644 \
   contrib/pam/amorphis.void /etc/pam.d/amorphis
 ```
@@ -75,6 +74,7 @@ XCB, and Wayland. Package names vary by distribution.
 git clone https://github.com/dani-77/amorphis.git
 cd amorphis
 cargo build --release
+sudo make install PREFIX=/usr/local
 ```
 
 Before running it, install a distribution-appropriate PAM policy named
@@ -83,6 +83,40 @@ Before running it, install a distribution-appropriate PAM policy named
 </details>
 
 ## Using it
+
+Running `amorphis` without arguments detects X11 or Wayland and reads
+`x11.toml` or `wayland.toml` from `${XDG_CONFIG_HOME:-$HOME/.config}/amorphis/`.
+If the profile is absent, the normal embedded background is used. An invalid
+profile stops before locking and reports its path and error. Profiles are read
+again on each invocation. `WAYLAND_DISPLAY` takes priority over `DISPLAY`, so
+XWayland does not select the X11 backend. The existing `--backend` commands
+below still work and use only the supplied CLI options.
+
+On Linux, Amorphis refuses to lock when `NoNewPrivs` is active. PAM policies
+using `pam_unix` may need a privileged password helper, which cannot work under
+that restriction. Launch the locker from the normal user session, outside a
+sandbox that sets `NoNewPrivs`.
+
+Example profiles are installed under `/usr/local/share/amorphis/examples/`
+with the default `PREFIX`; copy and edit them in your config directory.
+
+`amorphis-idle` reads `idle.toml` from the same config directory and runs as
+the current user. Each `[[rule]]` needs a positive `timeout` in seconds and a
+`command`, `command_x11`, or `command_wayland` applicable to the active session.
+A session-specific command takes priority over `command`. Optional
+`resume_command` runs after activity returns if the idle command fired. Commands
+are passed to `sh -c`. For example:
+
+```toml
+[[rule]]
+timeout = 300
+command = "amorphis"
+```
+
+Start `amorphis-idle` once in your session startup. Wayland requires the
+compositor's `ext-idle-notify-v1` protocol; X11 requires MIT-SCREEN-SAVER.
+Missing protocols are reported as errors. Idle detection runs independently of
+the locker process.
 
 Both backends use the embedded branded background by default:
 

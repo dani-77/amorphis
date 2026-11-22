@@ -14,6 +14,10 @@ pub enum HardeningError {
     CoreLimit(i32),
     #[cfg(target_os = "linux")]
     Dumpable(i32),
+    #[cfg(target_os = "linux")]
+    NoNewPrivs,
+    #[cfg(target_os = "linux")]
+    NoNewPrivsCheck(i32),
 }
 
 impl fmt::Display for HardeningError {
@@ -24,6 +28,17 @@ impl fmt::Display for HardeningError {
             Self::Dumpable(code) => {
                 write!(f, "could not disable process dumpability (errno {code})")
             }
+            #[cfg(target_os = "linux")]
+            Self::NoNewPrivs => f.write_str(
+                "NoNewPrivs is active; PAM may need a privileged helper, so locking is unsafe",
+            ),
+            #[cfg(target_os = "linux")]
+            Self::NoNewPrivsCheck(code) => {
+                write!(
+                    f,
+                    "could not check NoNewPrivs before locking (errno {code})"
+                )
+            }
         }
     }
 }
@@ -32,6 +47,21 @@ impl Error for HardeningError {}
 
 /// Disable process dumps before any password input is accepted.
 pub fn harden_process() -> Result<(), HardeningError> {
+    #[cfg(target_os = "linux")]
+    {
+        // PAM stacks such as pam_unix may invoke a setuid password helper.
+        // With NoNewPrivs it cannot gain the rights needed to check shadow,
+        // and a successful session lock could become impossible to unlock.
+        // SAFETY: PR_GET_NO_NEW_PRIVS takes no pointer arguments.
+        let no_new_privs = unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) };
+        if no_new_privs < 0 {
+            return Err(HardeningError::NoNewPrivsCheck(last_errno()));
+        }
+        if no_new_privs != 0 {
+            return Err(HardeningError::NoNewPrivs);
+        }
+    }
+
     let limit = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,

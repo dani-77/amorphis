@@ -1,6 +1,10 @@
 use amorphis::background::StaticBackground;
 use amorphis::cli::parse_background;
-use amorphis::{backend, system};
+use amorphis::{
+    backend, profile,
+    session::{self, Session},
+    system,
+};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -18,6 +22,9 @@ fn main() -> ExitCode {
             println!(
                 "Amorphis {}\n\nSecurity-first screen locker (early implementation).\n\nUsage:\n  amorphis --backend wayland|x11 [--image PATH.png | --capture | --solid]\n                                [--fit cover|contain|center]\n                                [--effect none|blur|pixelate|blur-pixelate]\n                                [--blur-radius 1..=128]\n                                [--pixel-size N]\n  amorphis --help\n  amorphis --version\n\nBoth backends use the embedded fallback image unless --image or --solid is selected.\nBoth also support --capture when the display server exposes the required capture\nmechanism. Effects apply to the selected background. Defaults: --effect none,\n--blur-radius 16, --pixel-size 16. Both backends require the PAM service\n{PAM_SERVICE_FILE}. Test development builds carefully before relying on them.",
                 env!("CARGO_PKG_VERSION")
+            );
+            println!(
+                "\nWithout arguments, Amorphis detects the session and reads x11.toml or wayland.toml from the amorphis config directory. A missing profile uses the default background."
             );
             ExitCode::SUCCESS
         }
@@ -37,6 +44,33 @@ fn main() -> ExitCode {
                     eprintln!("amorphis: {error}; try --help (session unchanged)");
                     ExitCode::from(2)
                 }
+            }
+        }
+        [] => {
+            let session = match Session::detect() {
+                Ok(session) => session,
+                Err(error) => {
+                    eprintln!("amorphis: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let dir = match session::config_dir() {
+                Ok(dir) => dir,
+                Err(error) => {
+                    eprintln!("amorphis: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let background = match profile::load(&dir, session) {
+                Ok(background) => background,
+                Err(error) => {
+                    eprintln!("amorphis: {error} (session unchanged)");
+                    return ExitCode::from(2);
+                }
+            };
+            match session {
+                Session::X11 => run_x11(background),
+                Session::Wayland => run_wayland(background),
             }
         }
         _ => {

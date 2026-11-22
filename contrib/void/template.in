@@ -16,5 +16,8 @@ checksum=@CHECKSUM@
 
 post_install() {
 	vlicense LICENSE
+	for example in x11 wayland idle; do
+		vinstall "examples/$example.toml" 644 usr/share/amorphis/examples
+	done
 	vinstall contrib/pam/amorphis.void 644 etc/pam.d amorphis
 }

@@ -1,0 +1,11 @@
+# Copy to ${XDG_CONFIG_HOME:-$HOME/.config}/amorphis/idle.toml.
+[[rule]]
+timeout = 300
+command = "amorphis"
+
+# A rule may use a different command on each session:
+# [[rule]]
+# timeout = 900
+# command_x11 = "slock"
+# command_wayland = "kantele-locker"
+# resume_command = "notify-send 'Session active'"
