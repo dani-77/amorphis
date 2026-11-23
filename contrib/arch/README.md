@@ -1,9 +1,11 @@
 # Arch Linux package
 
 `PKGBUILD`, `.SRCINFO`, and `amorphis.pam` form the source package for the
-Arch User Repository. The package builds the signed `v0.1.0` source archive,
-runs the Rust test suite, installs the binary under `/usr/bin`, and installs the
-PAM policy as `/etc/pam.d/amorphis`.
+Arch User Repository. The recipe downloads the archive from the signed
+`v0.2.0` tag, checks its digest, and runs the Rust test suite. It installs
+both binaries in `/usr/bin`, the examples in `/usr/share/amorphis/examples/`,
+and the PAM policy as `/etc/pam.d/amorphis`. Install `playerctl` separately
+to use the optional MPRIS playback rules.
 
 Before publishing an update, build it in a clean Arch environment, run
 `namcap` on both `PKGBUILD` and the resulting package, and regenerate
