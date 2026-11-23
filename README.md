@@ -88,6 +88,9 @@ Before running it, install a distribution-appropriate PAM policy named
 For setup, accepted TOML keys, and complete examples, see the
 [configuration guide](CONFIGURATION.md).
 
+`amorphis-idle` can defer idle rules while selected MPRIS players are playing,
+or for a set time with `amorphis-idle inhibit --for SECONDS`.
+
 Running `amorphis` without arguments detects X11 or Wayland and reads
 `x11.toml` or `wayland.toml` from `${XDG_CONFIG_HOME:-$HOME/.config}/amorphis/`.
 If the profile is absent, the normal embedded background is used. An invalid

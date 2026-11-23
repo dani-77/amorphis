@@ -4,6 +4,11 @@
 timeout = 300
 command = "amorphis"
 
+# Optional. Inhibit automatic rules while these MPRIS players are Playing.
+# Requires playerctl and MPRIS support in the player (e.g. mpv-mpris).
+# [inhibit]
+# players = ["mpv", "vlc"]
+
 # Instead, one rule may use a different command on each session:
 # [[rule]]
 # timeout = 900

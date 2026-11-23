@@ -1,34 +1,47 @@
-use amorphis::idle::{self, ActiveRule};
+use amorphis::idle::{self, IdleState, inhibit, media, wayland};
 use amorphis::session::{self, Session};
-use std::process::ExitCode;
+use smithay_client_toolkit::reexports::calloop::EventLoop;
+use std::ffi::OsString;
+use std::io::{self, Read};
+use std::os::unix::process::ExitStatusExt;
+use std::process::{Command, ExitCode};
+use std::time::Duration;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     if args == ["--help"] || args == ["-h"] {
-        println!("Usage: amorphis-idle\nReads idle.toml from the amorphis config directory.");
+        println!(
+            "Usage: amorphis-idle\n       amorphis-idle inhibit --for SECONDS\n       amorphis-idle inhibit -- COMMAND [ARG...]\n\nThe daemon reads idle.toml from the amorphis config directory."
+        );
         return ExitCode::SUCCESS;
     }
     if args == ["--version"] || args == ["-V"] {
         println!("amorphis-idle {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
-    if !args.is_empty() {
-        eprintln!("amorphis-idle: invalid arguments");
-        return ExitCode::from(2);
-    }
-    let result = (|| {
-        let session = Session::detect().map_err(str::to_owned)?;
-        let path = session::config_dir()
-            .map_err(str::to_owned)?
-            .join("idle.toml");
-        let rules = idle::load(&path, session)?;
-        match session {
-            Session::X11 => x11(rules),
-            Session::Wayland => wayland(rules),
+    let result = match args.as_slice() {
+        [] => run_daemon().map(|()| ExitCode::SUCCESS),
+        [inhib, flag, seconds] if inhib == "inhibit" && flag == "--for" => {
+            match seconds.to_str().and_then(|value| value.parse::<u32>().ok()) {
+                Some(seconds) if seconds > 0 => {
+                    inhibit_for(Duration::from_secs(u64::from(seconds)))
+                }
+                _ => {
+                    eprintln!("amorphis-idle: --for requires a positive number of seconds");
+                    return ExitCode::from(2);
+                }
+            }
         }
-    })();
+        [inhib, separator, command, arguments @ ..] if inhib == "inhibit" && separator == "--" => {
+            inhibit_command(command, arguments)
+        }
+        _ => {
+            eprintln!("amorphis-idle: invalid arguments; see --help");
+            return ExitCode::from(2);
+        }
+    };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("amorphis-idle: {error}");
             ExitCode::from(1)
@@ -36,7 +49,61 @@ fn main() -> ExitCode {
     }
 }
 
-fn x11(mut rules: Vec<ActiveRule>) -> Result<(), String> {
+fn connect_inhibitor() -> Result<std::os::unix::net::UnixStream, String> {
+    let session = Session::detect().map_err(str::to_owned)?;
+    inhibit::connect(session)
+        .map_err(|error| format!("cannot inhibit the idle daemon for this session: {error}"))
+}
+
+fn inhibit_for(duration: Duration) -> Result<ExitCode, String> {
+    let mut lease = connect_inhibitor()?;
+    lease
+        .set_read_timeout(Some(duration))
+        .map_err(|error| error.to_string())?;
+    match lease.read(&mut [0]) {
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            Ok(ExitCode::SUCCESS)
+        }
+        Ok(_) => Err("idle daemon closed the inhibition early".into()),
+        Err(error) => Err(format!("idle inhibitor: {error}")),
+    }
+}
+
+fn inhibit_command(command: &OsString, arguments: &[OsString]) -> Result<ExitCode, String> {
+    let _lease = connect_inhibitor()?;
+    let status = Command::new(command)
+        .args(arguments)
+        .status()
+        .map_err(|error| format!("could not run {command:?}: {error}"))?;
+    let code = status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+    Ok(ExitCode::from(code as u8))
+}
+
+fn run_daemon() -> Result<(), String> {
+    let session = Session::detect().map_err(str::to_owned)?;
+    let path = session::config_dir()
+        .map_err(str::to_owned)?
+        .join("idle.toml");
+    let config = idle::load(&path, session)?;
+    let mut event_loop = EventLoop::<IdleState>::try_new().map_err(|error| error.to_string())?;
+    let handle = event_loop.handle();
+    inhibit::listen(session, &handle)?;
+    let playing = media::watch(&config.players, &handle)?;
+    let state = IdleState::new(config.rules, playing);
+    match session {
+        Session::X11 => x11(&mut event_loop, state),
+        Session::Wayland => wayland::run(&mut event_loop, state),
+    }
+}
+
+fn x11(event_loop: &mut EventLoop<'_, IdleState>, mut state: IdleState) -> Result<(), String> {
     use x11rb::connection::Connection;
     use x11rb::protocol::screensaver::ConnectionExt;
     let (conn, screen) =
@@ -46,114 +113,35 @@ fn x11(mut rules: Vec<ActiveRule>) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .reply()
         .map_err(|error| format!("MIT-SCREEN-SAVER unavailable: {error}"))?;
+    let mut delay = Duration::ZERO;
     loop {
+        event_loop
+            .dispatch(delay, &mut state)
+            .map_err(|error| error.to_string())?;
         let idle_ms = conn
             .screensaver_query_info(root)
             .map_err(|e| e.to_string())?
             .reply()
             .map_err(|error| format!("MIT-SCREEN-SAVER query failed: {error}"))?
             .ms_since_user_input;
-        for rule in &mut rules {
-            if idle_ms >= rule.timeout_ms {
-                rule.idled();
-            } else {
+        let inhibited = state.inhibited();
+        let eligible_ms = state.restarted_at.map_or(idle_ms, |restart| {
+            idle_ms.min(restart.elapsed().as_millis().try_into().unwrap_or(u32::MAX))
+        });
+        for rule in &mut state.rules {
+            if idle_ms < rule.timeout_ms {
                 rule.resumed();
+            } else if !inhibited && eligible_ms >= rule.timeout_ms {
+                rule.idled();
             }
         }
-        let next = rules
+        let next = state
+            .rules
             .iter()
-            .filter(|r| !r.fired())
-            .map(|r| r.timeout_ms.saturating_sub(idle_ms))
+            .filter(|r| !inhibited && !r.fired())
+            .map(|r| r.timeout_ms.saturating_sub(eligible_ms))
             .min()
             .unwrap_or(1000);
-        std::thread::sleep(std::time::Duration::from_millis(u64::from(
-            next.clamp(100, 1000),
-        )));
-    }
-}
-
-fn wayland(rules: Vec<ActiveRule>) -> Result<(), String> {
-    use wayland_client::{
-        Connection, Dispatch, QueueHandle,
-        globals::{GlobalListContents, registry_queue_init},
-        protocol::{wl_registry, wl_seat},
-    };
-    use wayland_protocols::ext::idle_notify::v1::client::{
-        ext_idle_notification_v1, ext_idle_notifier_v1,
-    };
-
-    struct State {
-        rules: Vec<ActiveRule>,
-    }
-    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
-        fn event(
-            _: &mut Self,
-            _: &wl_registry::WlRegistry,
-            _: wl_registry::Event,
-            _: &GlobalListContents,
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-    impl Dispatch<wl_seat::WlSeat, ()> for State {
-        fn event(
-            _: &mut Self,
-            _: &wl_seat::WlSeat,
-            _: wl_seat::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-    impl Dispatch<ext_idle_notifier_v1::ExtIdleNotifierV1, ()> for State {
-        fn event(
-            _: &mut Self,
-            _: &ext_idle_notifier_v1::ExtIdleNotifierV1,
-            _: ext_idle_notifier_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-        }
-    }
-    impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, usize> for State {
-        fn event(
-            state: &mut Self,
-            _: &ext_idle_notification_v1::ExtIdleNotificationV1,
-            event: ext_idle_notification_v1::Event,
-            index: &usize,
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-            match event {
-                ext_idle_notification_v1::Event::Idled => state.rules[*index].idled(),
-                ext_idle_notification_v1::Event::Resumed => state.rules[*index].resumed(),
-                _ => {}
-            }
-        }
-    }
-    let conn = Connection::connect_to_env().map_err(|e| format!("Wayland connection: {e}"))?;
-    let (globals, mut queue) =
-        registry_queue_init::<State>(&conn).map_err(|e| format!("Wayland registry: {e}"))?;
-    let qh = queue.handle();
-    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = globals
-        .bind(&qh, 1..=1, ())
-        .map_err(|e| format!("ext-idle-notify-v1 unavailable: {e}"))?;
-    let seat: wl_seat::WlSeat = globals
-        .bind(&qh, 1..=1, ())
-        .map_err(|e| format!("Wayland seat unavailable: {e}"))?;
-    let mut state = State { rules };
-    let _notifications: Vec<_> = state
-        .rules
-        .iter()
-        .enumerate()
-        .map(|(index, rule)| notifier.get_idle_notification(rule.timeout_ms, &seat, &qh, index))
-        .collect();
-    loop {
-        queue
-            .blocking_dispatch(&mut state)
-            .map_err(|e| format!("Wayland event dispatch: {e}"))?;
+        delay = Duration::from_millis(u64::from(next.clamp(100, 1000)));
     }
 }
