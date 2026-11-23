@@ -29,6 +29,7 @@ wildcards = "deny"
 deny = []
 skip = [
     { crate = "miniz_oxide@0.8.9", reason = "png and flate2 are transitioning between compatible miniz_oxide releases" },
+    { crate = "syn@2", reason = "proc-macro dependencies currently span the syn 2 and 3 major versions" },
 ]
 skip-tree = []
 

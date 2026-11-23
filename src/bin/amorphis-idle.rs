@@ -1,4 +1,4 @@
-use amorphis::idle::{self, IdleState, inhibit, media, wayland};
+use amorphis::idle::{self, IdleState, dbus, inhibit, media, wayland};
 use amorphis::session::{self, Session};
 use smithay_client_toolkit::reexports::calloop::EventLoop;
 use std::ffi::OsString;
@@ -95,6 +95,9 @@ fn run_daemon() -> Result<(), String> {
     let mut event_loop = EventLoop::<IdleState>::try_new().map_err(|error| error.to_string())?;
     let handle = event_loop.handle();
     inhibit::listen(session, &handle)?;
+    if config.dbus {
+        dbus::listen(&handle)?;
+    }
     let playing = media::watch(&config.players, &handle)?;
     let state = IdleState::new(config.rules, playing);
     match session {

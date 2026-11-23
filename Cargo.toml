@@ -14,9 +14,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 smithay-client-toolkit = "0.20.0"
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
-toml = "0.9.12"
+toml = "1.1"
 x11rb = { version = "0.13.2", default-features = false, features = ["allow-unsafe-code", "image", "randr", "screensaver"] }
 xkbcommon = { version = "0.8.0", features = ["x11"] }
+zbus = "5.18.0"
 
 [profile.release]
 codegen-units = 1

@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
+pub mod dbus;
 pub mod inhibit;
 pub mod media;
 pub mod wayland;
@@ -33,17 +34,21 @@ struct Config {
 struct InhibitConfig {
     #[serde(default)]
     players: Vec<String>,
+    #[serde(default)]
+    dbus: bool,
 }
 
 pub struct IdleConfig {
     pub rules: Vec<ActiveRule>,
     pub players: Vec<String>,
+    pub dbus: bool,
 }
 
 pub struct IdleState {
     pub rules: Vec<ActiveRule>,
     manual_inhibitors: usize,
     playing: bool,
+    dbus_inhibited: bool,
     pub restarted_at: Option<Instant>,
     pub restart_pending: bool,
 }
@@ -54,13 +59,14 @@ impl IdleState {
             rules,
             manual_inhibitors: 0,
             playing,
+            dbus_inhibited: false,
             restarted_at: None,
             restart_pending: false,
         }
     }
 
     pub fn inhibited(&self) -> bool {
-        self.manual_inhibitors > 0 || self.playing
+        self.manual_inhibitors > 0 || self.playing || self.dbus_inhibited
     }
 
     pub fn acquire(&mut self) {
@@ -75,6 +81,14 @@ impl IdleState {
     pub fn set_playing(&mut self, playing: bool) {
         let was_inhibited = self.inhibited();
         self.playing = playing;
+        if was_inhibited {
+            self.restart_if_uninhibited();
+        }
+    }
+
+    fn set_dbus_inhibited(&mut self, inhibited: bool) {
+        let was_inhibited = self.inhibited();
+        self.dbus_inhibited = inhibited;
         if was_inhibited {
             self.restart_if_uninhibited();
         }
@@ -187,6 +201,7 @@ fn parse(source: &str, session: Session) -> Result<IdleConfig, String> {
     Ok(IdleConfig {
         rules,
         players: config.inhibit.players,
+        dbus: config.inhibit.dbus,
     })
 }
 
@@ -254,11 +269,15 @@ mod tests {
         let mut state = IdleState::new(Vec::new(), true);
         state.acquire();
         state.acquire();
+        state.set_dbus_inhibited(true);
         state.set_playing(false);
         state.release();
         assert!(state.inhibited());
         assert!(state.restarted_at.is_none());
         state.release();
+        assert!(state.inhibited());
+        assert!(state.restarted_at.is_none());
+        state.set_dbus_inhibited(false);
         assert!(!state.inhibited());
         assert!(state.restarted_at.is_some());
         assert!(state.restart_pending);

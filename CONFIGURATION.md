@@ -163,6 +163,30 @@ consulta-o aproximadamente uma vez por segundo, quando a lista está
 configurada. Sem `playerctl` ou sem estado MPRIS disponível, continua a
 aplicar as regras normais. Reinicia o daemon após editar a lista.
 
+### Receber pedidos de inibição por D-Bus
+
+Ativa a opção em `idle.toml` e reinicia o daemon. Se já tiveres um bloco
+`[inhibit]`, acrescenta a opção a esse bloco.
+
+```toml
+[inhibit]
+dbus = true
+players = ["mpv", "vlc"]
+```
+
+`players` é opcional. Com `dbus = true`, as aplicações que chamam
+`org.freedesktop.ScreenSaver.Inhibit` na sessão podem adiar as regras de
+idle em X11 ou Wayland. Cada aplicação liberta o seu pedido com
+`UnInhibit`. Ao desligar-se do bus, todos os pedidos dessa conexão são
+libertados. O timeout volta a contar quando termina a última inibição.
+
+Esta opção usa o bus D-Bus da sessão e vem desligada por omissão. Se o
+nome `org.freedesktop.ScreenSaver` já estiver em uso ou se o bus estiver
+indisponível, o daemon avisa em `stderr` e continua com as restantes
+regras e inibidores. Um browser pode usar outro mecanismo, como o portal
+ou os inibidores nativos de Wayland. Para reuniões que não ativem uma
+inibição, continua disponível o comando manual.
+
 ### Inibir durante uma reunião
 
 Com o daemon em execução, usa este comando num terminal ou num atalho do
