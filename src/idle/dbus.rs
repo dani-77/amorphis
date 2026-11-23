@@ -1,14 +1,16 @@
 //! Session bus implementation of the freedesktop idle inhibition API.
 
 use super::IdleState;
+use futures_lite::StreamExt;
 use smithay_client_toolkit::reexports::calloop::{LoopHandle, channel};
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::Duration;
-use zbus::blocking::{Connection, MessageIterator, connection::Builder, fdo::DBusProxy};
-use zbus::fdo::{Error, RequestNameFlags, RequestNameReply};
+use zbus::connection::Builder;
+use zbus::fdo::{DBusProxy, Error, RequestNameFlags, RequestNameReply};
 use zbus::message::{Flags, Header, Message, Type};
 use zbus::names::OwnedUniqueName;
+use zbus::{Connection, MessageStream};
 
 const SERVICE: &str = "org.freedesktop.ScreenSaver";
 const PATH: &str = "/org/freedesktop/ScreenSaver";
@@ -52,7 +54,7 @@ pub fn listen(handle: &LoopHandle<'_, IdleState>) -> Result<(), String> {
     std::thread::Builder::new()
         .name("amorphis-dbus".into())
         .spawn(move || {
-            if let Err(error) = serve(tx) {
+            if let Err(error) = zbus::block_on(serve(tx)) {
                 eprintln!("amorphis-idle: D-Bus inhibition unavailable: {error}");
             }
         })
@@ -60,23 +62,26 @@ pub fn listen(handle: &LoopHandle<'_, IdleState>) -> Result<(), String> {
     Ok(())
 }
 
-fn serve(tx: channel::Sender<Update>) -> Result<(), Box<dyn std::error::Error>> {
-    let connection = Builder::session()?.method_timeout(TIMEOUT).build()?;
-    let bus = DBusProxy::new(&connection)?;
+async fn serve(tx: channel::Sender<Update>) -> Result<(), Box<dyn std::error::Error>> {
+    let connection = Builder::session().method_timeout(TIMEOUT).build().await?;
+    let bus = DBusProxy::new(&connection).await?;
     // Consume method calls and owner changes in the order they arrive over
     // the same connection. An exiting caller cannot leave a queued request
     // behind after its disconnect has already been processed.
-    let messages = MessageIterator::from(&connection);
+    let mut messages = MessageStream::from(&connection);
     bus.add_match_rule(
         zbus::MatchRule::builder()
             .msg_type(Type::Signal)
-            .sender(BUS)?
-            .path("/org/freedesktop/DBus")?
-            .interface(BUS)?
-            .member("NameOwnerChanged")?
-            .build(),
-    )?;
-    if bus.request_name(SERVICE.try_into()?, RequestNameFlags::DoNotQueue.into())?
+            .sender(BUS)
+            .path("/org/freedesktop/DBus")
+            .interface(BUS)
+            .member("NameOwnerChanged")
+            .build()?,
+    )
+    .await?;
+    if bus
+        .request_name(SERVICE.try_into()?, RequestNameFlags::DO_NOT_QUEUE)
+        .await?
         != RequestNameReply::PrimaryOwner
     {
         return Err(format!("{SERVICE} already belongs to another service").into());
@@ -87,12 +92,12 @@ fn serve(tx: channel::Sender<Update>) -> Result<(), Box<dyn std::error::Error>> 
         tx,
         event_loop_failed: false,
     };
-    for message in messages {
+    while let Some(message) = messages.next().await {
         let message = message?;
         let header = message.header();
         match message.message_type() {
             Type::MethodCall => {
-                service.dispatch(&connection, &message, &header)?;
+                service.dispatch(&connection, &message, &header).await?;
                 // If an update timed out, close the connection and let
                 // the event loop clear all bus inhibitors when it can.
                 if service.event_loop_failed {
@@ -128,21 +133,21 @@ struct ScreenSaver {
 }
 
 impl ScreenSaver {
-    fn dispatch(
+    async fn dispatch(
         &mut self,
         connection: &Connection,
         message: &Message,
         header: &Header<'_>,
     ) -> zbus::Result<()> {
         let result = self.call(message, header);
-        if header.primary().flags().contains(Flags::NoReplyExpected) {
+        if header.primary().flags().contains(Flags::NO_REPLY_EXPECTED) {
             return Ok(());
         }
         match result {
-            Ok(Reply::Cookie(cookie)) => connection.reply(header, &cookie),
-            Ok(Reply::Xml) => connection.reply(header, &INTROSPECTION),
-            Ok(Reply::Empty) => connection.reply(header, &()),
-            Err(error) => connection.reply_dbus_error(header, error),
+            Ok(Reply::Cookie(cookie)) => connection.reply(header, &cookie).await,
+            Ok(Reply::Xml) => connection.reply(header, &INTROSPECTION).await,
+            Ok(Reply::Empty) => connection.reply(header, &()).await,
+            Err(error) => connection.reply_dbus_error(header, error).await,
         }
     }
 
