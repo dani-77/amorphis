@@ -1,9 +1,9 @@
 [package]
 name = "amorphis"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
-description = "A small, fail-closed screen locker for Wayland and X11"
+description = "A screen locker and idle daemon for Wayland and X11"
 publish = false
 
 [dependencies]

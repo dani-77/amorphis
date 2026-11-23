@@ -30,10 +30,15 @@ before v0.1.0.
 
 ## Release procedure
 
-1. Confirm a clean tree and a successful CI run on `main`.
-2. Re-run the commands in the README's Development section.
-3. Replace `Unreleased` in `CHANGELOG.md` with the release date and commit it.
-4. Create a signed tag with `git tag -s v0.1.0 -m "Amorphis 0.1.0"` and push it.
-5. Download the exact tag archive, calculate its SHA-256, and follow
-   `contrib/void/README.md` to finalize and test the XBPS template.
-6. Publish the GitHub release using the v0.1.0 changelog entry.
+1. Set the release version in `Cargo.toml` and the matching dependency in
+   `fuzz/Cargo.toml`. Refresh both lockfiles and date the entry in
+   `CHANGELOG.md`.
+2. Run the development checks in the README and test installation with a
+   temporary `DESTDIR`. Confirm a clean tree and successful CI on `main`.
+3. Create and push the signed release tag. For example, use
+   `git tag -s v0.2.0 -m "Amorphis 0.2.0"`.
+4. Download the exact source archive served by GitHub and calculate its
+   SHA-256. Use the digest to refresh the packaging files on `main` in a
+   follow-up commit. Follow the [Void](contrib/void/README.md) and
+   [Arch](contrib/arch/README.md) instructions before publishing packages.
+5. Publish the GitHub release using the matching changelog entry.
